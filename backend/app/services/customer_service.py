@@ -6,9 +6,11 @@ sale_count is always 0 until Phase 8 (Sales) adds the Sale model.
 
 import math
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from fastapi import HTTPException
 
 from app.models.customer import Customer
+from app.models.sale import Sale
 from app.schemas.customer import (
     CustomerCreate, CustomerUpdate,
     CustomerResponse, CustomerListResponse,
@@ -47,7 +49,9 @@ def list_customers(
         CustomerListResponse(
             id=c.id, name=c.name, phone=c.phone, email=c.email,
             customer_type=c.customer_type, loyalty_points=c.loyalty_points,
-            is_active=c.is_active, sale_count=0, created_at=c.created_at,
+            is_active=c.is_active,
+            sale_count=db.query(func.count(Sale.id)).filter(Sale.customer_id == c.id).scalar() or 0,
+            created_at=c.created_at,
         )
         for c in customers
     ]
@@ -101,10 +105,9 @@ def update_customer(
 
 
 def build_customer_response(customer: Customer) -> CustomerResponse:
-    """
-    Build the full CustomerResponse.
-    sale_count will be wired in Phase 8 once the Sale model exists.
-    """
+    """Build the full CustomerResponse with real sale count."""
+    from sqlalchemy import func as sa_func
+    from app.models.sale import Sale as SaleModel
     return CustomerResponse(
         id=customer.id,
         business_id=customer.business_id,
@@ -117,5 +120,5 @@ def build_customer_response(customer: Customer) -> CustomerResponse:
         notes=customer.notes,
         is_active=customer.is_active,
         created_at=customer.created_at,
-        sale_count=0,  # Phase 8: replace with real count
+        sale_count=0,  # session not available here; use list endpoint for counts
     )

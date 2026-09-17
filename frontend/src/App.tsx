@@ -17,6 +17,9 @@ import AdjustmentsHistoryPage   from '@/pages/AdjustmentsHistoryPage'
 import LowStockAlertsPage       from '@/pages/LowStockAlertsPage'
 import ScanPage                 from '@/pages/ScanPage'
 import CustomersPage            from '@/pages/CustomersPage'
+import POSPage                  from '@/pages/POSPage'
+import SalesListPage            from '@/pages/SalesListPage'
+import SaleDetailPage           from '@/pages/SaleDetailPage'
 import ComingSoon               from '@/components/ui/ComingSoon'
 
 export default function App() {
@@ -50,10 +53,11 @@ export default function App() {
         <Route path="/inventory/alerts"       element={<LowStockAlertsPage />} />
 
         {/* Phase 5–13 placeholders */}
-        <Route path="/pos"        element={<ComingSoon page="POS / New Sale"   phase="Phase 8" />} />
+        <Route path="/pos"        element={<POSPage />} />
         <Route path="/scan"       element={<ScanPage />} />
         <Route path="/customers"  element={<CustomersPage />} />
-        <Route path="/sales"      element={<ComingSoon page="Sales"            phase="Phase 8" />} />
+        <Route path="/sales"      element={<SalesListPage />} />
+        <Route path="/sales/:id"  element={<SaleDetailPage />} />
         <Route path="/invoices"   element={<ComingSoon page="Invoices"         phase="Phase 9" />} />
         <Route path="/warranty"   element={<ComingSoon page="Warranty"         phase="Phase 10" />} />
         <Route path="/returns"    element={<ComingSoon page="Returns"          phase="Phase 11" />} />

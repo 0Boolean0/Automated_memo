@@ -17,6 +17,7 @@ import {
   RotateCcw,
   BarChart3,
   Receipt,
+  FileText,
   UserCog,
   Settings,
   Database,
@@ -55,7 +56,7 @@ const NAV_ITEMS: NavItem[] = [
 
   { icon: Users,           label: 'Customers',   path: '/customers',  dividerBefore: true },
   { icon: Receipt,         label: 'Sales',       path: '/sales' },
-  { icon: Receipt,         label: 'Invoices',    path: '/invoices' },
+  { icon: FileText,        label: 'Invoices',    path: '/invoices' },
   { icon: Shield,          label: 'Warranty',    path: '/warranty' },
   { icon: RotateCcw,       label: 'Returns',     path: '/returns',    permission: 'manage_returns' },
 
