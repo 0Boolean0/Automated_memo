@@ -1,14 +1,7 @@
 """
 SmartStock — Main FastAPI Application Entry Point.
 
-This is where FastAPI is created and configured.
-Everything flows from this file:
-  - CORS middleware (allows phone browser to call the API)
-  - All API routes are mounted here
-  - Static files (built React app) will be served from here in production
-  - Startup events (database initialization)
-
-Run this file with:
+Run with:
     uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 """
 
@@ -18,18 +11,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
+from pathlib import Path
 
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, SessionLocal
 from app.api.v1.router import api_router
 
-# Import all models so SQLAlchemy knows about them when creating tables.
-# Even though we use Alembic for migrations, this import ensures models
-# are registered in Base.metadata.
-import app.models  # noqa: F401
+import app.models  # noqa: F401 — registers all models with Base.metadata
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Logging setup
+# Logging
 # ─────────────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO if settings.DEBUG else logging.WARNING,
@@ -39,64 +30,46 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Lifespan: runs on startup and shutdown
+# Lifespan
 # ─────────────────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Code before 'yield' runs at application startup.
-    Code after 'yield' runs at application shutdown.
-
-    On startup we:
-    1. Create all database tables that don't exist yet.
-       (In production, Alembic migrations handle this instead.)
-    2. Log a startup message.
-    """
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Database: {settings.DATABASE_URL}")
 
-    # Create tables for any models not yet in the database.
-    # Safe to call multiple times — it won't recreate existing tables.
-    # NOTE: For Phase 2+ always use Alembic migrations (alembic upgrade head)
-    # instead of relying on this for schema changes.
+    # Create any tables not yet in the DB (safe, idempotent)
     Base.metadata.create_all(bind=engine)
-    logger.info("Database tables verified/created.")
+    logger.info("Database tables verified.")
 
-    yield  # Application runs here
+    # Seed defaults on first run (creates admin user + roles if DB is empty)
+    from app.utils.seeder import seed_database
+    db = SessionLocal()
+    try:
+        seed_database(db)
+    finally:
+        db.close()
+
+    yield
 
     logger.info(f"{settings.APP_NAME} shutting down.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FastAPI Application
+# FastAPI app
 # ─────────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title=settings.APP_NAME,
     description=settings.APP_DESCRIPTION,
     version=settings.APP_VERSION,
-    # Swagger UI available at http://localhost:8000/docs
-    # ReDoc available at http://localhost:8000/redoc
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# CORS Middleware
+# CORS
 # ─────────────────────────────────────────────────────────────────────────────
-# CORS (Cross-Origin Resource Sharing) controls which domains/IPs are allowed
-# to make requests to our API from a browser.
-#
-# Problem: The React app runs on localhost:5173 during development.
-# The FastAPI runs on localhost:8000.
-# Browsers block cross-origin requests unless the server explicitly allows them.
-#
-# In development we allow all origins (*) to make local testing easy.
-# IMPORTANT: In production, restrict this to your actual domain only.
-
 if settings.DEBUG:
-    # Development: allow all origins (easy local testing from phone)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -105,7 +78,6 @@ if settings.DEBUG:
         allow_headers=["*"],
     )
 else:
-    # Production: only allow listed origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
@@ -114,25 +86,23 @@ else:
         allow_headers=["Authorization", "Content-Type"],
     )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Static files (logos, built React app in production)
+# ─────────────────────────────────────────────────────────────────────────────
+settings.STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(settings.STATIC_DIR)), name="static")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# API Routes
+# API routes
 # ─────────────────────────────────────────────────────────────────────────────
-# All API endpoints are prefixed with /api/v1
-# This versioning means future breaking changes can be introduced at /api/v2
-# without breaking existing clients.
 app.include_router(api_router, prefix="/api/v1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Root endpoint
+# Root
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/", tags=["root"])
 def root():
-    """
-    Root endpoint. In production this will serve the React app.
-    During development, the React Vite dev server handles the frontend.
-    """
     return {
         "message": f"Welcome to {settings.APP_NAME} API",
         "version": settings.APP_VERSION,

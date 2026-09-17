@@ -1,26 +1,37 @@
 """
 Main API v1 router.
-
-This file collects all endpoint routers and mounts them under /api/v1.
-As we build each feature (auth, products, sales...), we import its router here.
-
-Think of this as the "table of contents" for the entire API.
+Collects all feature routers and mounts them under /api/v1.
 """
 
 from fastapi import APIRouter
-from app.api.v1.endpoints import health
+from app.api.v1.endpoints import health, auth, users, roles, business
 
-# The main v1 router. All feature routers are included here.
 api_router = APIRouter()
 
-# Health check — always available, no authentication required
-api_router.include_router(
-    health.router,
-    prefix="/health",
-    tags=["health"],
-)
+# Health — always public
+api_router.include_router(health.router,    prefix="/health",   tags=["health"])
 
-# Future routers will be added here as we build each phase:
-# from app.api.v1.endpoints import auth, products, sales, ...
-# api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-# api_router.include_router(products.router, prefix="/products", tags=["products"])
+# Auth — login/logout/me
+api_router.include_router(auth.router,      prefix="/auth",     tags=["auth"])
+
+# User management (Admin/Manager)
+api_router.include_router(users.router,     prefix="/users",    tags=["users"])
+
+# Role management (Admin)
+api_router.include_router(roles.router,     prefix="/roles",    tags=["roles"])
+
+# Business settings
+api_router.include_router(business.router,  prefix="/business", tags=["business"])
+
+# ── Future routes (added in later phases) ─────────────────────────────────────
+# Phase 3:  products, variants, brands, categories
+# Phase 4:  suppliers, purchases
+# Phase 5:  inventory, serials
+# Phase 6:  scan
+# Phase 7:  customers
+# Phase 8:  sales, pos
+# Phase 9:  invoices
+# Phase 10: warranties
+# Phase 11: returns, damaged
+# Phase 12: reports
+# Phase 13: backup

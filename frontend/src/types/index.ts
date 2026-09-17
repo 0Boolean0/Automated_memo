@@ -23,6 +23,7 @@ export interface Role {
   id: number
   name: RoleName
   permissions: string[]
+  created_at?: string
 }
 
 export type RoleName = 'ADMIN' | 'MANAGER' | 'STAFF' | 'SELLER' | 'VIEWER'

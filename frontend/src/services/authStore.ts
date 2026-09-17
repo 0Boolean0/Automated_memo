@@ -1,23 +1,21 @@
 /**
  * Authentication state store using Zustand.
  *
- * Zustand is a lightweight state management library.
- * Think of it like a global variable that React components can
- * subscribe to and re-render when it changes.
- *
- * Why Zustand instead of React Context?
- * - No Provider wrapper needed in the component tree.
- * - Components only re-render when the specific value they use changes.
- * - Simpler API than Redux.
- *
- * Usage in any component:
- *   const { user, login, logout, hasPermission } = useAuthStore()
+ * Calls the real /api/v1/auth/login endpoint.
+ * Stores the JWT token in localStorage so the Axios interceptor
+ * in api.ts attaches it to every subsequent request.
  */
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import api from '@/services/api'
-import type { User, LoginCredentials, AuthResponse } from '@/types'
+import type { User, LoginCredentials } from '@/types'
+
+interface LoginResponse {
+  access_token: string
+  token_type: string
+  user: User
+}
 
 interface AuthState {
   user: User | null
@@ -25,16 +23,14 @@ interface AuthState {
   isAuthenticated: boolean
   isLoading: boolean
 
-  // Actions
   login: (credentials: LoginCredentials) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
+  refreshMe: () => Promise<void>
   hasPermission: (permission: string) => boolean
   hasRole: (role: string) => boolean
 }
 
 export const useAuthStore = create<AuthState>()(
-  // persist middleware saves the state to localStorage automatically.
-  // When the user refreshes the page, the state is restored.
   persist(
     (set, get) => ({
       user: null,
@@ -45,31 +41,40 @@ export const useAuthStore = create<AuthState>()(
       login: async (credentials: LoginCredentials) => {
         set({ isLoading: true })
         try {
-          const response = await api.post<AuthResponse>('/auth/login', credentials)
-          const { access_token, user } = response.data
-
-          // Store token in localStorage so the Axios interceptor can attach it
-          localStorage.setItem('access_token', access_token)
-
+          const { data } = await api.post<LoginResponse>('/auth/login', credentials)
+          localStorage.setItem('access_token', data.access_token)
           set({
-            user,
-            token: access_token,
+            user: data.user,
+            token: data.access_token,
             isAuthenticated: true,
             isLoading: false,
           })
         } catch (error) {
           set({ isLoading: false })
-          throw error // Let the login form handle the error message
+          throw error
         }
       },
 
-      logout: () => {
+      logout: async () => {
+        try {
+          await api.post('/auth/logout')
+        } catch {
+          // Ignore — logout is best-effort
+        }
         localStorage.removeItem('access_token')
-        set({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-        })
+        set({ user: null, token: null, isAuthenticated: false })
+      },
+
+      /** Re-fetch the current user profile from /auth/me (e.g. after profile update) */
+      refreshMe: async () => {
+        try {
+          const { data } = await api.get<User>('/auth/me')
+          set({ user: data })
+        } catch {
+          // Token may be expired — clear state
+          localStorage.removeItem('access_token')
+          set({ user: null, token: null, isAuthenticated: false })
+        }
       },
 
       hasPermission: (permission: string): boolean => {
@@ -85,8 +90,7 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name: 'smartstock-auth', // localStorage key
-      // Only persist the user and token, not loading state
+      name: 'smartstock-auth',
       partialize: (state) => ({
         user: state.user,
         token: state.token,
