@@ -21,7 +21,7 @@ export default function DashboardPage() {
       <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-6 text-white">
         <h2 className="text-xl font-semibold">Welcome to SmartStock</h2>
         <p className="text-primary-100 mt-1 text-sm">
-          Phases 1–6 complete — inventory adjustments and barcode scanning are live.
+          Phases 1–7 complete — customers, inventory, and barcode scanning are live.
         </p>
       </div>
 
@@ -51,7 +51,7 @@ export default function DashboardPage() {
             { phase: 'Phase 4',  label: 'Suppliers, Purchases, Stock Receiving', done: true },
             { phase: 'Phase 5',  label: 'Inventory management', done: true },
             { phase: 'Phase 6',  label: 'Phone camera barcode scanner', done: true },
-            { phase: 'Phase 7',  label: 'Customers', done: false },
+            { phase: 'Phase 7',  label: 'Customers', done: true },
             { phase: 'Phase 8',  label: 'POS / Sales', done: false },
             { phase: 'Phase 9',  label: 'Invoice / Memo PDF', done: false },
             { phase: 'Phase 10', label: 'Warranty tracking', done: false },
