@@ -41,6 +41,17 @@ export default {
       screens: {
         'xs': '375px',
       },
+
+      // Custom animations
+      keyframes: {
+        'scan-line': {
+          '0%, 100%': { top: '20%' },
+          '50%':       { top: '78%' },
+        },
+      },
+      animation: {
+        'scan-line': 'scan-line 2s ease-in-out infinite',
+      },
     },
   },
 

@@ -78,6 +78,26 @@ export interface PaginatedProducts {
   pages: number
 }
 
+/** Phase 6: Result from GET /products/scan */
+export interface ScanResult {
+  variant_id: number
+  variant_name: string
+  sku: string | null
+  barcode: string | null
+  product_id: number
+  product_name: string
+  is_serialized: boolean
+  brand_name: string | null
+  category_name: string | null
+  cost_price: number
+  selling_price: number
+  current_stock: number
+  reorder_level: number
+  in_stock_serials: number | null
+  is_low_stock: boolean
+  warranty_months: number
+}
+
 export interface ProductListParams {
   search?: string
   category_id?: number
@@ -174,4 +194,8 @@ export const productService = {
 
   getPriceHistory: (variantId: number) =>
     api.get<PriceHistory[]>(`/products/variants/${variantId}/price-history`).then(r => r.data),
+
+  /** Phase 6: Look up a variant by barcode or SKU (barcode scanner). */
+  scan: (params: { barcode?: string; sku?: string }) =>
+    api.get<ScanResult>('/products/scan', { params }).then(r => r.data),
 }

@@ -59,6 +59,26 @@ def create_product(
     return product_service._build_product_response(product)
 
 
+@router.get("/scan", tags=["products"])
+def scan_product(
+    barcode: Optional[str] = Query(None),
+    sku:     Optional[str] = Query(None),
+    current_user: User = Depends(require_permission("view_products")),
+    db: Session = Depends(get_db),
+):
+    """
+    Look up a product variant by barcode or SKU.
+    Used by the barcode scanner page.
+
+    Query params (at least one required):
+    - barcode: the barcode value scanned from camera
+    - sku: the variant SKU to look up
+    """
+    return product_service.lookup_by_scan(
+        db, current_user.business_id, barcode=barcode, sku=sku
+    )
+
+
 @router.get("/{product_id}", response_model=ProductResponse)
 def get_product(
     product_id: int,

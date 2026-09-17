@@ -25,6 +25,8 @@ import {
   Tag,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
+  AlertTriangle,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuthStore } from '@/services/authStore'
@@ -46,6 +48,8 @@ const NAV_ITEMS: NavItem[] = [
   { icon: Package,         label: 'Products',    path: '/products',   dividerBefore: true },
   { icon: Tag,             label: 'Categories & Brands', path: '/catalog' },
   { icon: Boxes,           label: 'Inventory',   path: '/inventory' },
+  { icon: ClipboardList,   label: 'Adjustments', path: '/inventory/adjustments' },
+  { icon: AlertTriangle,   label: 'Low Stock',   path: '/inventory/alerts' },
   { icon: Layers,          label: 'Purchases',   path: '/purchases', permission: 'receive_stock' },
   { icon: Truck,           label: 'Suppliers',   path: '/suppliers',  permission: 'view_suppliers' },
 

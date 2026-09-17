@@ -362,3 +362,67 @@ def get_variant_price_history(db: Session, variant_id: int, business_id: int) ->
         .order_by(PriceHistory.changed_at.desc())
         .all()
     )
+
+
+# ─── Barcode / SKU scan lookup ────────────────────────────────────────────────
+
+def lookup_by_scan(
+    db: Session,
+    business_id: int,
+    barcode: str | None = None,
+    sku: str | None = None,
+) -> dict:
+    """
+    Look up a product variant by barcode or SKU.
+
+    Used by the barcode scanner page (Phase 6).
+    Returns the variant with its parent product details and current stock.
+
+    Raises 404 if not found.
+    """
+    if not barcode and not sku:
+        raise HTTPException(status_code=422, detail="Provide barcode or sku")
+
+    query = (
+        db.query(ProductVariant)
+        .join(Product)
+        .filter(Product.business_id == business_id, ProductVariant.is_active == True)
+    )
+
+    if barcode and sku:
+        query = query.filter(
+            or_(ProductVariant.barcode == barcode, ProductVariant.sku == sku)
+        )
+    elif barcode:
+        query = query.filter(ProductVariant.barcode == barcode)
+    else:
+        query = query.filter(ProductVariant.sku == sku)
+
+    variant: ProductVariant | None = query.first()
+    if not variant:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No product found for {'barcode=' + barcode if barcode else 'sku=' + sku}",
+        )
+
+    product = variant.product
+    in_stock_serials = variant.serials.filter_by(status="IN_STOCK").count() if product.is_serialized else None
+
+    return {
+        "variant_id":       variant.id,
+        "variant_name":     variant.name,
+        "sku":              variant.sku,
+        "barcode":          variant.barcode,
+        "product_id":       product.id,
+        "product_name":     product.name,
+        "is_serialized":    product.is_serialized,
+        "brand_name":       product.brand.name if product.brand else None,
+        "category_name":    product.category.name if product.category else None,
+        "cost_price":       float(variant.cost_price),
+        "selling_price":    float(variant.selling_price),
+        "current_stock":    variant.current_stock,
+        "reorder_level":    variant.reorder_level,
+        "in_stock_serials": in_stock_serials,
+        "is_low_stock":     variant.current_stock < variant.reorder_level,
+        "warranty_months":  variant.warranty_months,
+    }
