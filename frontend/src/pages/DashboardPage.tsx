@@ -48,7 +48,7 @@ export default function DashboardPage() {
             { phase: 'Phase 1',  label: 'Project setup, FastAPI, React, SQLite', done: true },
             { phase: 'Phase 2',  label: 'Authentication, Users, Roles', done: true },
             { phase: 'Phase 3',  label: 'Products, Variants, SKU, Barcode, Serial', done: true },
-            { phase: 'Phase 4',  label: 'Suppliers, Purchases, Stock Receiving', done: false },
+            { phase: 'Phase 4',  label: 'Suppliers, Purchases, Stock Receiving', done: true },
             { phase: 'Phase 5',  label: 'Inventory management', done: false },
             { phase: 'Phase 6',  label: 'Phone camera barcode scanner', done: false },
             { phase: 'Phase 7',  label: 'Customers', done: false },
