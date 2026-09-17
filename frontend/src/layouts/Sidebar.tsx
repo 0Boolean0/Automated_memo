@@ -22,6 +22,7 @@ import {
   Database,
   LogOut,
   Boxes,
+  Tag,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -43,6 +44,7 @@ const NAV_ITEMS: NavItem[] = [
   { icon: ScanLine,        label: 'Scan Product', path: '/scan' },
 
   { icon: Package,         label: 'Products',    path: '/products',   dividerBefore: true },
+  { icon: Tag,             label: 'Categories & Brands', path: '/catalog' },
   { icon: Boxes,           label: 'Inventory',   path: '/inventory' },
   { icon: Layers,          label: 'Purchases',   path: '/purchases', permission: 'receive_stock' },
   { icon: Truck,           label: 'Suppliers',   path: '/suppliers',  permission: 'view_suppliers' },
