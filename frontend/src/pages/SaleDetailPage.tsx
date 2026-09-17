@@ -4,10 +4,13 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Loader2, Receipt, User, Star, Tag } from 'lucide-react'
+import { ArrowLeft, Loader2, Receipt, User, Star, Tag, Download, Printer } from 'lucide-react'
 import Badge from '@/components/ui/Badge'
 import { saleService, type Sale, type SaleSerial } from '@/services/saleService'
+import { useAuthStore } from '@/services/authStore'
 import { formatCurrency, formatDate } from '@/utils/format'
+import api from '@/services/api'
+import toast from 'react-hot-toast'
 
 function paymentBadge(status: string): 'green' | 'yellow' | 'red' {
   return status === 'PAID' ? 'green' : status === 'PARTIAL' ? 'yellow' : 'red'
@@ -16,10 +19,13 @@ function paymentBadge(status: string): 'green' | 'yellow' | 'red' {
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { hasPermission } = useAuthStore()
+  const canDownload = hasPermission('generate_invoice')
 
-  const [sale, setSale]       = useState<Sale | null>(null)
-  const [serials, setSerials] = useState<SaleSerial[]>([])
-  const [loading, setLoading] = useState(true)
+  const [sale, setSale]             = useState<Sale | null>(null)
+  const [serials, setSerials]       = useState<SaleSerial[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [downloading, setDownloading] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -37,6 +43,41 @@ export default function SaleDetailPage() {
 
   const hasSerials = serials.length > 0
 
+  const downloadPDF = async () => {
+    setDownloading(true)
+    try {
+      const response = await api.get(`/sales/${sale.id}/invoice`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `invoice_${sale.sale_number}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Invoice downloaded')
+    } catch {
+      toast.error('Failed to generate invoice')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const printPDF = async () => {
+    setDownloading(true)
+    try {
+      const response = await api.get(`/sales/${sale.id}/invoice`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }))
+      const win = window.open(url, '_blank')
+      if (win) win.onload = () => { win.print(); window.URL.revokeObjectURL(url) }
+      else { window.URL.revokeObjectURL(url); toast.error('Allow pop-ups to print') }
+    } catch {
+      toast.error('Failed to generate invoice')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="max-w-3xl mx-auto space-y-5">
       {/* Header */}
@@ -51,6 +92,28 @@ export default function SaleDetailPage() {
           </div>
           <p className="text-sm text-gray-500 mt-0.5">{formatDate(sale.sale_date)}</p>
         </div>
+        {canDownload && (
+          <div className="flex gap-2">
+            <button
+              onClick={printPDF}
+              disabled={downloading}
+              className="btn-secondary flex items-center gap-2 text-sm"
+              title="Open PDF and print"
+            >
+              {downloading ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />}
+              Print
+            </button>
+            <button
+              onClick={downloadPDF}
+              disabled={downloading}
+              className="btn-primary flex items-center gap-2 text-sm"
+              title="Download invoice PDF"
+            >
+              {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+              Invoice PDF
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Customer + payment summary */}

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Invoice {{ sale_number }}</title>
+  <style>
+    /* ── Reset ── */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* ── Page ── */
+    @page {
+      size: A4;
+      margin: 16mm 14mm 20mm 14mm;
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 9px;
+        color: #9ca3af;
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      }
+    }
+
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      color: #1f2937;
+      line-height: 1.5;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 16px;
+      border-bottom: 2px solid #2563eb;
+      margin-bottom: 20px;
+    }
+    .business-block .biz-name {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1e3a8a;
+      letter-spacing: -0.3px;
+    }
+    .business-block .biz-meta {
+      font-size: 10px;
+      color: #6b7280;
+      margin-top: 3px;
+      line-height: 1.6;
+    }
+    .invoice-block {
+      text-align: right;
+    }
+    .invoice-block .invoice-label {
+      font-size: 22px;
+      font-weight: 800;
+      color: #2563eb;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .invoice-block .invoice-number {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1f2937;
+      font-family: 'Courier New', Courier, monospace;
+      margin-top: 2px;
+    }
+    .invoice-block .invoice-meta {
+      font-size: 10px;
+      color: #6b7280;
+      margin-top: 4px;
+      line-height: 1.6;
+    }
+
+    /* ── Addresses ── */
+    .addresses {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+    .address-box {
+      flex: 1;
+      background: #f9fafb;
+      border-radius: 6px;
+      padding: 12px 14px;
+    }
+    .address-box .addr-label {
+      font-size: 9px;
+      font-weight: 700;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 5px;
+    }
+    .address-box .addr-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #111827;
+    }
+    .address-box .addr-detail {
+      font-size: 10px;
+      color: #4b5563;
+      line-height: 1.6;
+      margin-top: 2px;
+    }
+
+    /* ── Items table ── */
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-size: 11px;
+    }
+    .items-table thead tr {
+      background: #1e3a8a;
+      color: white;
+    }
+    .items-table thead th {
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .items-table thead th.right { text-align: right; }
+    .items-table thead th.center { text-align: center; }
+
+    .items-table tbody tr { border-bottom: 1px solid #e5e7eb; }
+    .items-table tbody tr:nth-child(even) { background: #f9fafb; }
+    .items-table tbody td { padding: 8px 10px; vertical-align: top; }
+    .items-table tbody td.right { text-align: right; }
+    .items-table tbody td.center { text-align: center; }
+
+    .item-name { font-weight: 600; color: #111827; }
+    .item-variant { font-size: 9.5px; color: #6b7280; margin-top: 1px; }
+    .serial-list { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+    .serial-chip {
+      font-size: 8.5px;
+      font-family: 'Courier New', Courier, monospace;
+      background: #dbeafe;
+      color: #1e40af;
+      border-radius: 3px;
+      padding: 1px 4px;
+    }
+
+    /* ── Totals ── */
+    .totals-section {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 24px;
+    }
+    .totals-table {
+      width: 260px;
+    }
+    .totals-table tr td {
+      padding: 4px 0;
+      font-size: 11px;
+    }
+    .totals-table .label { color: #6b7280; text-align: left; padding-right: 16px; }
+    .totals-table .value { text-align: right; font-weight: 500; color: #1f2937; }
+    .totals-table .deduction .label { color: #059669; }
+    .totals-table .deduction .value { color: #059669; }
+    .totals-table .total-row td {
+      font-size: 13px;
+      font-weight: 700;
+      color: #111827;
+      border-top: 1px solid #d1d5db;
+      padding-top: 8px;
+      margin-top: 4px;
+    }
+    .totals-table .due-row td {
+      font-size: 12px;
+      font-weight: 700;
+      color: #dc2626;
+    }
+    .totals-table .paid-row td {
+      font-size: 11px;
+      color: #059669;
+    }
+
+    /* ── Status badge ── */
+    .status-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .badge-PAID    { background: #d1fae5; color: #065f46; }
+    .badge-PARTIAL { background: #fef3c7; color: #92400e; }
+    .badge-DUE     { background: #fee2e2; color: #991b1b; }
+
+    /* ── Notes ── */
+    .notes-section {
+      background: #f9fafb;
+      border-left: 3px solid #2563eb;
+      padding: 10px 14px;
+      border-radius: 0 6px 6px 0;
+      font-size: 10px;
+      color: #374151;
+      margin-bottom: 20px;
+    }
+    .notes-section strong {
+      display: block;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #6b7280;
+      margin-bottom: 3px;
+    }
+
+    /* ── Loyalty ── */
+    .loyalty-section {
+      background: #fefce8;
+      border: 1px solid #fde68a;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 10px;
+      color: #92400e;
+      margin-bottom: 16px;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 30px;
+      padding-top: 12px;
+      border-top: 1px solid #e5e7eb;
+      text-align: center;
+      font-size: 9.5px;
+      color: #9ca3af;
+    }
+    .footer .thank-you {
+      font-size: 12px;
+      font-weight: 600;
+      color: #1e3a8a;
+      margin-bottom: 3px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────── -->
+  <div class="header">
+    <div class="business-block">
+      <div class="biz-name">{{ business_name }}</div>
+      <div class="biz-meta">
+        {% if business_address %}{{ business_address }}<br>{% endif %}
+        {% if business_phone %}Tel: {{ business_phone }}<br>{% endif %}
+        {% if business_email %}{{ business_email }}<br>{% endif %}
+        {% if business_tax %}TIN/VAT: {{ business_tax }}{% endif %}
+      </div>
+    </div>
+
+    <div class="invoice-block">
+      <div class="invoice-label">Invoice</div>
+      <div class="invoice-number">{{ sale_number }}</div>
+      <div class="invoice-meta">
+        Date: {{ sale_date }}<br>
+        <span class="status-badge badge-{{ payment_status }}">{{ payment_status }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Addresses ──────────────────────────────────────── -->
+  <div class="addresses">
+    <div class="address-box">
+      <div class="addr-label">From</div>
+      <div class="addr-name">{{ business_name }}</div>
+      {% if business_address %}
+      <div class="addr-detail">{{ business_address }}</div>
+      {% endif %}
+    </div>
+
+    <div class="address-box">
+      <div class="addr-label">Bill To</div>
+      {% if customer_name %}
+        <div class="addr-name">{{ customer_name }}</div>
+        <div class="addr-detail">
+          {% if customer_phone %}Tel: {{ customer_phone }}<br>{% endif %}
+          {% if customer_email %}{{ customer_email }}<br>{% endif %}
+          {% if customer_address %}{{ customer_address }}{% endif %}
+        </div>
+      {% else %}
+        <div class="addr-name">Walk-in Customer</div>
+        <div class="addr-detail">No account on file</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── Items ──────────────────────────────────────────── -->
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th style="width: 40%">Item</th>
+        <th class="center" style="width: 8%">Qty</th>
+        <th class="right"  style="width: 14%">Unit Price</th>
+        <th class="right"  style="width: 14%">Discount</th>
+        <th class="right"  style="width: 14%">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>
+          <div class="item-name">{{ item.product_name }}</div>
+          <div class="item-variant">{{ item.variant_name }}{% if item.sku %} · {{ item.sku }}{% endif %}</div>
+          {% if item.serials %}
+          <div class="serial-list">
+            {% for s in item.serials %}
+            <span class="serial-chip">{{ s }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </td>
+        <td class="center">{{ item.quantity }}</td>
+        <td class="right">{{ currency_symbol }}{{ item.unit_price | fmt_amount }}</td>
+        <td class="right">
+          {% if item.discount_amount > 0 %}
+          <span style="color:#059669">−{{ currency_symbol }}{{ item.discount_amount | fmt_amount }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="right" style="font-weight:600">{{ currency_symbol }}{{ item.total_price | fmt_amount }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- ── Totals ─────────────────────────────────────────── -->
+  <div class="totals-section">
+    <table class="totals-table">
+      <tr>
+        <td class="label">Subtotal</td>
+        <td class="value">{{ currency_symbol }}{{ total_amount | fmt_amount }}</td>
+      </tr>
+      {% if discount_amount > 0 %}
+      <tr class="deduction">
+        <td class="label">Discount</td>
+        <td class="value">−{{ currency_symbol }}{{ discount_amount | fmt_amount }}</td>
+      </tr>
+      {% endif %}
+      {% if loyalty_redeemed > 0 %}
+      <tr class="deduction">
+        <td class="label">Loyalty ({{ loyalty_redeemed }} pts)</td>
+        <td class="value">−{{ currency_symbol }}{{ loyalty_value | fmt_amount }}</td>
+      </tr>
+      {% endif %}
+      <tr class="total-row">
+        <td class="label">Net Payable</td>
+        <td class="value">{{ currency_symbol }}{{ net_payable | fmt_amount }}</td>
+      </tr>
+      <tr class="paid-row">
+        <td class="label">Paid</td>
+        <td class="value">{{ currency_symbol }}{{ paid_amount | fmt_amount }}</td>
+      </tr>
+      {% if due_amount > 0 %}
+      <tr class="due-row">
+        <td class="label">Balance Due</td>
+        <td class="value">{{ currency_symbol }}{{ due_amount | fmt_amount }}</td>
+      </tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <!-- ── Loyalty earned ─────────────────────────────────── -->
+  {% if loyalty_earned > 0 %}
+  <div class="loyalty-section">
+    ⭐ {{ loyalty_earned }} loyalty point{{ 's' if loyalty_earned != 1 else '' }} earned on this purchase!
+    {% if customer_name %}
+    Total balance for {{ customer_name }}: {{ loyalty_balance }} pts
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ── Notes ─────────────────────────────────────────── -->
+  {% if notes %}
+  <div class="notes-section">
+    <strong>Notes</strong>
+    {{ notes }}
+  </div>
+  {% endif %}
+
+  <!-- ── Footer ────────────────────────────────────────── -->
+  <div class="footer">
+    <div class="thank-you">Thank you for your business!</div>
+    {% if business_website %}{{ business_website }} · {% endif %}
+    Generated by SmartStock · {{ generated_at }}
+  </div>
+
+</body>
+</html>

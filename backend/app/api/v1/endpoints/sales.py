@@ -8,6 +8,7 @@ GET  /sales/{id}/serials → all serials sold in a sale
 """
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -17,6 +18,7 @@ from app.models.user import User
 from app.models.serial import SerialNumber
 from app.schemas.sale import SaleCreate, SaleResponse, PaginatedSales
 from app.services import sale_service
+from app.services import invoice_service
 
 router = APIRouter()
 
@@ -89,3 +91,27 @@ def list_sale_serials(
                 "sold_at":      sn.sold_at.isoformat() if sn.sold_at else None,
             })
     return {"sale_id": sale_id, "serial_count": len(serials), "serials": serials}
+
+
+@router.get("/{sale_id}/invoice")
+def download_invoice(
+    sale_id: int,
+    current_user: User = Depends(require_permission("generate_invoice")),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate and download a PDF invoice for the given sale.
+
+    The PDF is generated on-demand, cached to pdfs/invoice_{sale_number}.pdf,
+    and returned as a file download.
+    """
+    pdf_path = invoice_service.generate_invoice_pdf(
+        db, sale_id, current_user.business_id
+    )
+    sale = sale_service.get_sale(db, sale_id, current_user.business_id)
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=f"invoice_{sale.sale_number}.pdf",
+        headers={"Content-Disposition": f'attachment; filename="invoice_{sale.sale_number}.pdf"'},
+    )
