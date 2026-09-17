@@ -1,0 +1,283 @@
+/**
+ * Stock adjustment modal — Phase 5.
+ *
+ * Form for creating inventory adjustments with:
+ * - Variant selector
+ * - Adjustment type dropdown
+ * - Quantity input (positive/negative)
+ * - Reason text field (mandatory)
+ * - Optional notes
+ */
+
+import { useEffect, useState, useMemo } from 'react'
+import { Plus, Loader2, Search } from 'lucide-react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import toast from 'react-hot-toast'
+import Modal from '@/components/ui/Modal'
+import inventoryService, { type AdjustmentCreate } from '@/services/inventoryService'
+import { productService, type ProductVariant } from '@/services/productService'
+
+const ADJUSTMENT_TYPES = [
+  { value: 'PHYSICAL_COUNT', label: 'Physical Count', hint: 'Stock count discrepancy' },
+  { value: 'DAMAGE', label: 'Damage', hint: 'Stock damaged and removed' },
+  { value: 'LOSS', label: 'Loss', hint: 'Stock lost or stolen' },
+  { value: 'TRANSFER', label: 'Transfer', hint: 'Stock transferred' },
+  { value: 'RETURN', label: 'Return', hint: 'Return from customer/supplier' },
+  { value: 'CORRECTION', label: 'Correction', hint: 'Correction of previous error' },
+]
+
+const adjustmentSchema = z.object({
+  variant_id: z.number({ invalid_type_error: 'Select a variant' }).min(1),
+  adjustment_type: z.string().min(1, 'Select adjustment type'),
+  quantity_change: z.number({ invalid_type_error: 'Enter quantity' })
+    .refine(v => v !== 0, 'Quantity must be non-zero'),
+  reason: z.string().min(5, 'Reason must be at least 5 characters'),
+  notes: z.string().optional(),
+})
+
+type AdjustmentFormData = z.infer<typeof adjustmentSchema>
+
+interface Props {
+  isOpen: boolean
+  onClose: () => void
+  onAdjusted?: () => void
+}
+
+export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted }: Props) {
+  const [variants, setVariants] = useState<ProductVariant[]>([])
+  const [variantSearch, setVariantSearch] = useState('')
+  const [loadingVariants, setLoadingVariants] = useState(false)
+
+  const { register, handleSubmit, reset, formState: { errors, isSubmitting }, watch } = useForm<AdjustmentFormData>({
+    resolver: zodResolver(adjustmentSchema),
+    defaultValues: {
+      quantity_change: 1,
+    },
+  })
+
+  const selectedVariantId = watch('variant_id')
+  const adjustmentType = watch('adjustment_type')
+  const quantityChange = watch('quantity_change')
+
+  // Get current stock of selected variant for display
+  const selectedVariant = useMemo(
+    () => variants.find(v => v.id === selectedVariantId),
+    [selectedVariantId, variants]
+  )
+
+  // Load all variants once
+  useEffect(() => {
+    if (!isOpen) return
+
+    const loadVariants = async () => {
+      setLoadingVariants(true)
+      try {
+        let allVariants: ProductVariant[] = []
+        let page = 1
+        let hasMore = true
+
+        while (hasMore) {
+          const result = await productService.list({ page, per_page: 100 })
+          for (const product of result.items) {
+            allVariants = allVariants.concat(product.variants ?? [])
+          }
+          hasMore = page < result.pages
+          page++
+        }
+
+        setVariants(allVariants)
+      } catch (error) {
+        console.error('Failed to load variants:', error)
+        toast.error('Failed to load product variants')
+      } finally {
+        setLoadingVariants(false)
+      }
+    }
+
+    loadVariants()
+  }, [isOpen])
+
+  // Filter variants based on search
+  const filteredVariants = useMemo(() => {
+    if (!variantSearch) return variants
+    const search = variantSearch.toLowerCase()
+    return variants.filter(v => 
+      v.name?.toLowerCase().includes(search) ||
+      v.sku?.toLowerCase().includes(search)
+    )
+  }, [variants, variantSearch])
+
+  const onSubmit = async (data: AdjustmentFormData) => {
+    try {
+      const payload: AdjustmentCreate = {
+        variant_id: data.variant_id,
+        adjustment_type: data.adjustment_type,
+        quantity_change: data.quantity_change,
+        reason: data.reason,
+        notes: data.notes || undefined,
+      }
+
+      await inventoryService.createAdjustment(payload)
+      toast.success('Stock adjustment recorded')
+      reset()
+      setVariantSearch('')
+      onClose()
+      onAdjusted?.()
+    } catch { /* interceptor */ }
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Adjust Stock" maxWidth="md">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+
+        {/* ── Variant Selector ─────────────────────────────────────────── */}
+        <div>
+          <label className="label">Product Variant *</label>
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              className="input pl-9 mb-2"
+              placeholder="Search by name or SKU…"
+              value={variantSearch}
+              onChange={e => setVariantSearch(e.target.value)}
+              disabled={loadingVariants}
+            />
+          </div>
+          <select
+            className="input"
+            {...register('variant_id', { valueAsNumber: true })}
+            disabled={loadingVariants}
+          >
+            <option value="">— Select Variant —</option>
+            {filteredVariants.map(v => (
+              <option key={v.id} value={v.id}>
+                {v.name} (SKU: {v.sku || 'N/A'}) - Current: {v.current_stock}
+              </option>
+            ))}
+          </select>
+          {errors.variant_id && <p className="mt-1 text-xs text-red-600">{errors.variant_id.message}</p>}
+
+          {/* Current stock info */}
+          {selectedVariant && (
+            <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
+              <p className="text-xs text-blue-700">
+                <span className="font-semibold">Current Stock:</span> {selectedVariant.current_stock} units
+              </p>
+              <p className="text-xs text-blue-700 mt-1">
+                <span className="font-semibold">After Adjustment:</span>{' '}
+                <span className={selectedVariant.current_stock + (quantityChange || 0) < 0 ? 'text-red-600 font-bold' : ''}>
+                  {selectedVariant.current_stock + (quantityChange || 0)} units
+                </span>
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ── Adjustment Type ──────────────────────────────────────────── */}
+        <div>
+          <label className="label">Adjustment Type *</label>
+          <select className="input" {...register('adjustment_type')}>
+            <option value="">— Select Type —</option>
+            {ADJUSTMENT_TYPES.map(type => (
+              <option key={type.value} value={type.value}>
+                {type.label}
+              </option>
+            ))}
+          </select>
+          {errors.adjustment_type && <p className="mt-1 text-xs text-red-600">{errors.adjustment_type.message}</p>}
+
+          {/* Type hint */}
+          {adjustmentType && (
+            <p className="mt-1 text-xs text-gray-500">
+              {ADJUSTMENT_TYPES.find(t => t.value === adjustmentType)?.hint}
+            </p>
+          )}
+        </div>
+
+        {/* ── Quantity Change ──────────────────────────────────────────── */}
+        <div>
+          <label className="label">Quantity Change *</label>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              className="input"
+              placeholder="e.g. 5 or -3"
+              {...register('quantity_change', { valueAsNumber: true })}
+            />
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const current = watch('quantity_change') || 0
+                  reset({ ...watch(), quantity_change: current + 1 })
+                }}
+                className="btn-secondary px-3"
+              >
+                +1
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const current = watch('quantity_change') || 0
+                  reset({ ...watch(), quantity_change: current - 1 })
+                }}
+                className="btn-secondary px-3"
+              >
+                −1
+              </button>
+            </div>
+          </div>
+          {errors.quantity_change && <p className="mt-1 text-xs text-red-600">{errors.quantity_change.message}</p>}
+        </div>
+
+        {/* ── Reason ────────────────────────────────────────────────────── */}
+        <div>
+          <label className="label">Reason *</label>
+          <textarea
+            className="input"
+            rows={3}
+            placeholder="Why is this adjustment being made? (e.g., Found 5 units damaged in storage, inventory count mismatch)"
+            {...register('reason')}
+          />
+          {errors.reason && <p className="mt-1 text-xs text-red-600">{errors.reason.message}</p>}
+        </div>
+
+        {/* ── Notes ─────────────────────────────────────────────────────── */}
+        <div>
+          <label className="label">Notes (optional)</label>
+          <textarea
+            className="input"
+            rows={2}
+            placeholder="Additional context or reference numbers…"
+            {...register('notes')}
+          />
+        </div>
+
+        {/* ── Actions ───────────────────────────────────────────────────── */}
+        <div className="flex gap-3 justify-end pt-2 border-t border-gray-100">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="submit"
+            disabled={isSubmitting || loadingVariants}
+            className="btn-primary flex items-center gap-2"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 size={15} className="animate-spin" />
+                Recording…
+              </>
+            ) : (
+              <>
+                <Plus size={15} />
+                Record Adjustment
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
