@@ -1,0 +1,37 @@
+# Database — never commit business data
+data/*.db
+backups/
+pdfs/
+
+# Environment / secrets
+backend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+
+# Node.js
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+backend/static/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Empty leftover folder from project restructure
+smartstock/
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp

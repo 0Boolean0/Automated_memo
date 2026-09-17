@@ -1,0 +1,33 @@
+# SmartStock Backend Dependencies
+# Install with: pip install -r requirements.txt
+
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Database ORM
+sqlalchemy==2.0.35
+alembic==1.13.3
+
+# Data validation
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.12
+
+# PDF generation
+weasyprint==62.3
+jinja2==3.1.4
+
+# QR code
+qrcode[pil]==7.4.2
+Pillow==10.4.0
+
+# Scheduled tasks (auto backup)
+apscheduler==3.10.4
+
+# Date utilities
+python-dateutil==2.9.0
