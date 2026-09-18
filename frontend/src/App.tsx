@@ -21,6 +21,7 @@ import POSPage                  from '@/pages/POSPage'
 import SalesListPage            from '@/pages/SalesListPage'
 import SaleDetailPage           from '@/pages/SaleDetailPage'
 import InvoicesPage             from '@/pages/InvoicesPage'
+import WarrantyPage             from '@/pages/WarrantyPage'
 import ComingSoon               from '@/components/ui/ComingSoon'
 
 export default function App() {
@@ -60,7 +61,7 @@ export default function App() {
         <Route path="/sales"      element={<SalesListPage />} />
         <Route path="/sales/:id"  element={<SaleDetailPage />} />
         <Route path="/invoices"   element={<InvoicesPage />} />
-        <Route path="/warranty"   element={<ComingSoon page="Warranty"         phase="Phase 10" />} />
+        <Route path="/warranty"   element={<WarrantyPage />} />
         <Route path="/returns"    element={<ComingSoon page="Returns"          phase="Phase 11" />} />
         <Route path="/reports"    element={<ComingSoon page="Reports"          phase="Phase 12" />} />
         <Route path="/backup"     element={<ComingSoon page="Backup & Restore" phase="Phase 13" />} />
