@@ -29,7 +29,10 @@ const productSchema = z.object({
   description:   z.string().optional(),
   brand_id:      z.coerce.number().optional().nullable(),
   category_id:   z.coerce.number().optional().nullable(),
-  is_serialized: z.boolean().default(true),
+  // Radio buttons always return strings — coerce "true"/"false" to boolean
+  is_serialized: z.union([z.boolean(), z.string()]).transform(v =>
+    v === true || v === 'true'
+  ),
   variants:      z.array(variantSchema).min(1, 'Add at least one variant'),
 })
 
@@ -47,10 +50,10 @@ interface Props {
 export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct, categories, brands }: Props) {
   const isEdit = !!editProduct
 
-  const { register, control, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<ProductFormData>({
+  const { register, control, handleSubmit, reset, watch, formState: { errors, isSubmitting } } = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
     defaultValues: {
-      is_serialized: true,
+      is_serialized: 'true' as any,
       variants: [{ name: 'Standard', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5 }],
     },
   })
@@ -65,7 +68,7 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
         description:   editProduct.description ?? '',
         brand_id:      editProduct.brand_id ?? undefined,
         category_id:   editProduct.category_id ?? undefined,
-        is_serialized: editProduct.is_serialized,
+        is_serialized: editProduct.is_serialized ? 'true' as any : 'false' as any,
         variants:      editProduct.variants.map(v => ({
           name:            v.name,
           sku:             v.sku ?? '',
@@ -78,7 +81,7 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
       })
     } else {
       reset({
-        is_serialized: true,
+        is_serialized: 'true' as any,
         variants: [{ name: 'Standard', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5 }],
       })
     }
@@ -110,13 +113,13 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
           description:   data.description,
           brand_id:      data.brand_id ?? null,
           category_id:   data.category_id ?? null,
-          is_serialized: data.is_serialized,
+          is_serialized: data.is_serialized as boolean,
           variants:      data.variants,
         })
-        toast.success('Product created')
+        toast.success('Product created — now receive stock to add units')
       }
-      onSaved()
       onClose()
+      onSaved()   // refresh list AFTER modal closes so it's visible
     } catch { /* interceptor */ }
   }
 
