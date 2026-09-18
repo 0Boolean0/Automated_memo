@@ -101,9 +101,13 @@ api.interceptors.response.use(
         }
         break
 
-      case 403:
-        toast.error('You do not have permission to perform this action.')
+      case 403: {
+        // Permission denied — show which permission is missing if available
+        const detail = data?.detail
+        const msg = typeof detail === 'string' ? detail : 'You do not have permission to perform this action.'
+        toast.error(msg)
         break
+      }
 
       case 404:
         // 404s are common and often handled by the calling component

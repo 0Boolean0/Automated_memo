@@ -59,7 +59,7 @@ class Settings(BaseSettings):
 
     # How long the access token is valid. Short expiry = more secure.
     # The refresh token (set in cookie) lasts longer and gets a new access token.
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # 1 hour during development (use 15 in prod)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 hours — comfortable for a full work day
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # ─────────────────────────────────────────

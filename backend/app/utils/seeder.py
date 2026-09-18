@@ -95,61 +95,86 @@ ROLE_PERMISSIONS = {
 def seed_database(db: Session) -> None:
     """
     Idempotent seed function — safe to call on every startup.
-    Only creates records if they don't exist yet.
+    - First run: creates business, roles, admin user.
+    - Every run: syncs role permissions to match ROLE_PERMISSIONS dict.
+      This ensures new permissions added in later phases are applied to
+      existing databases without requiring a manual DB edit.
     """
-    # Check if already seeded
     existing_business = db.query(Business).first()
-    if existing_business:
-        return  # Already seeded, nothing to do
 
-    logger.info("First run detected — seeding database with defaults...")
+    if not existing_business:
+        logger.info("First run detected — seeding database with defaults...")
 
-    # ── 1. Create default business ────────────────────────────────────────────
-    business = Business(
-        name=settings.DEFAULT_BUSINESS_NAME,
-        slug="my-gadget-shop",
-        currency=settings.DEFAULT_CURRENCY,
-        is_active=True,
-    )
-    db.add(business)
-    db.flush()  # get business.id without committing
-    logger.info(f"Created business: {business.name} (id={business.id})")
-
-    # ── 2. Create default roles ───────────────────────────────────────────────
-    roles: dict[str, Role] = {}
-    for role_name, permissions in ROLE_PERMISSIONS.items():
-        role = Role(
-            business_id=business.id,
-            name=role_name,
-            permissions=permissions,
+        # ── 1. Create default business ────────────────────────────────────────
+        business = Business(
+            name=settings.DEFAULT_BUSINESS_NAME,
+            slug="my-gadget-shop",
+            currency=settings.DEFAULT_CURRENCY,
+            is_active=True,
         )
-        db.add(role)
-        roles[role_name] = role
-        logger.info(f"Created role: {role_name} ({len(permissions)} permissions)")
+        db.add(business)
+        db.flush()
+        logger.info(f"Created business: {business.name} (id={business.id})")
 
-    db.flush()  # get role IDs
+        # ── 2. Create default roles ───────────────────────────────────────────
+        roles: dict[str, Role] = {}
+        for role_name, permissions in ROLE_PERMISSIONS.items():
+            role = Role(
+                business_id=business.id,
+                name=role_name,
+                permissions=permissions,
+            )
+            db.add(role)
+            roles[role_name] = role
+            logger.info(f"Created role: {role_name} ({len(permissions)} permissions)")
 
-    # ── 3. Create default admin user ──────────────────────────────────────────
-    admin = User(
-        business_id=business.id,
-        username="admin",
-        hashed_password=hash_password("admin123"),
-        full_name="Administrator",
-        is_active=True,
-    )
-    db.add(admin)
-    db.flush()  # get admin.id
+        db.flush()
 
-    admin_user_role = UserRole(user_id=admin.id, role_id=roles["ADMIN"].id)
-    db.add(admin_user_role)
+        # ── 3. Create default admin user ──────────────────────────────────────
+        admin = User(
+            business_id=business.id,
+            username="admin",
+            hashed_password=hash_password("admin123"),
+            full_name="Administrator",
+            is_active=True,
+        )
+        db.add(admin)
+        db.flush()
 
-    db.commit()
+        admin_user_role = UserRole(user_id=admin.id, role_id=roles["ADMIN"].id)
+        db.add(admin_user_role)
 
-    logger.info("=" * 50)
-    logger.info("Database seeded successfully!")
-    logger.info(f"  Business: {business.name}")
-    logger.info("  Default login:")
-    logger.info("    Username: admin")
-    logger.info("    Password: admin123")
-    logger.info("  ⚠ CHANGE THE PASSWORD AFTER FIRST LOGIN!")
-    logger.info("=" * 50)
+        db.commit()
+
+        logger.info("=" * 50)
+        logger.info("Database seeded successfully!")
+        logger.info(f"  Business: {business.name}")
+        logger.info("  Default login:")
+        logger.info("    Username: admin")
+        logger.info("    Password: admin123")
+        logger.info("  CHANGE THE PASSWORD AFTER FIRST LOGIN!")
+        logger.info("=" * 50)
+
+    else:
+        # ── Sync permissions for existing databases ───────────────────────────
+        # When new permissions are added in later phases the DB already exists
+        # and the seeder won't re-run. This block updates every role's
+        # permission list to match the current ROLE_PERMISSIONS dict.
+        updated = 0
+        for role_name, permissions in ROLE_PERMISSIONS.items():
+            role = db.query(Role).filter(
+                Role.business_id == existing_business.id,
+                Role.name == role_name,
+            ).first()
+            if role:
+                current = set(role.permissions or [])
+                expected = set(permissions)
+                if current != expected:
+                    role.permissions = permissions
+                    updated += 1
+                    logger.info(f"Updated permissions for role '{role_name}' "
+                                f"(+{len(expected - current)} new, "
+                                f"-{len(current - expected)} removed)")
+        if updated:
+            db.commit()
+            logger.info(f"Synced permissions for {updated} role(s).")
