@@ -114,6 +114,37 @@ def adjust_stock(
 
     variant.current_stock = new_stock
 
+    # ── For serialized products, sync serial numbers ──────────────────────
+    if product.is_serialized:
+        if data.quantity_change > 0:
+            sku_clean = (variant.sku or f"VAR{variant.id}").replace(" ", "").upper()
+            date_str = datetime.now(timezone.utc).strftime("%y%m%d")
+            existing_count = db.query(SerialNumber).filter_by(variant_id=variant.id).count()
+            for i in range(1, data.quantity_change + 1):
+                sn = SerialNumber(
+                    business_id=business_id,
+                    variant_id=variant.id,
+                    serial=f"{sku_clean}-{date_str}-{existing_count + i:04d}",
+                    status="IN_STOCK",
+                    cost_price=variant.cost_price,
+                )
+                db.add(sn)
+        elif data.quantity_change < 0:
+            serials_to_update = (
+                db.query(SerialNumber)
+                .filter_by(variant_id=variant.id, status="IN_STOCK")
+                .limit(abs(data.quantity_change))
+                .all()
+            )
+            status_map = {
+                AdjustmentType.DAMAGE: "DEFECTIVE",
+                AdjustmentType.LOSS: "LOST",
+                AdjustmentType.PHYSICAL_COUNT: "ADJUSTED",
+            }
+            new_status = status_map.get(adjustment_type, "ADJUSTED")
+            for sn in serials_to_update:
+                sn.status = new_status
+
     # ── Commit atomically ──────────────────────────────────────────────────
     db.commit()
     db.refresh(adjustment)
