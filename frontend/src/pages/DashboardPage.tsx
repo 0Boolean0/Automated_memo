@@ -185,7 +185,7 @@ export default function DashboardPage() {
             { phase: 'Phase 10', label: 'Warranty tracking',                          done: true },
             { phase: 'Phase 11', label: 'Returns & Damaged products',                 done: true },
             { phase: 'Phase 12', label: 'Dashboard charts & Reports',                 done: true },
-            { phase: 'Phase 13', label: 'Backup & Restore',                           done: false },
+            { phase: 'Phase 13', label: 'Backup & Restore',                           done: true },
           ].map((item) => (
             <li key={item.phase} className="flex items-center gap-3">
               <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0

@@ -24,6 +24,7 @@ import InvoicesPage             from '@/pages/InvoicesPage'
 import WarrantyPage             from '@/pages/WarrantyPage'
 import ReturnsPage              from '@/pages/ReturnsPage'
 import ReportsPage              from '@/pages/ReportsPage'
+import BackupPage               from '@/pages/BackupPage'
 import ComingSoon               from '@/components/ui/ComingSoon'
 
 export default function App() {
@@ -66,7 +67,7 @@ export default function App() {
         <Route path="/warranty"   element={<WarrantyPage />} />
         <Route path="/returns"    element={<ReturnsPage />} />
         <Route path="/reports"    element={<ReportsPage />} />
-        <Route path="/backup"     element={<ComingSoon page="Backup & Restore" phase="Phase 13" />} />
+        <Route path="/backup"     element={<BackupPage />} />
         <Route path="/more"       element={<ComingSoon page="More"             phase="—" />} />
         <Route path="*"           element={<ComingSoon page="Page Not Found"   phase="—" />} />
       </Route>
