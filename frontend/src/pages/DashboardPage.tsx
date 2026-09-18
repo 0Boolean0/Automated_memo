@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ShoppingCart, Package, Shield, TrendingUp,
-  AlertTriangle, RotateCcw, Loader2,
+  AlertTriangle, RotateCcw, Loader2, ScanLine,
 } from 'lucide-react'
 import Badge from '@/components/ui/Badge'
 import reportsService, { type DashboardSummary } from '@/services/reportsService'
@@ -66,11 +66,27 @@ export default function DashboardPage() {
     <div className="space-y-6">
 
       {/* Welcome banner */}
-      <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-6 text-white">
-        <h2 className="text-xl font-semibold">Welcome to SmartStock</h2>
-        <p className="text-primary-100 mt-1 text-sm">
-          All 13 phases complete — your inventory system is fully operational.
-        </p>
+      <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-6 text-white flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h2 className="text-xl font-semibold">Welcome to SmartStock</h2>
+          <p className="text-primary-100 mt-1 text-sm">
+            Real-time inventory, sales terminal, barcode scanning, and warranty tracking.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/pos')}
+            className="px-3.5 py-2 bg-white text-primary-700 font-medium rounded-lg text-sm hover:bg-primary-50 transition-colors shadow-sm flex items-center gap-1.5"
+          >
+            <ShoppingCart size={15} /> POS / New Sale
+          </button>
+          <button
+            onClick={() => navigate('/scan')}
+            className="px-3.5 py-2 bg-primary-800 text-white font-medium rounded-lg text-sm hover:bg-primary-900 transition-colors flex items-center gap-1.5 border border-primary-500/30"
+          >
+            <ScanLine size={15} /> Scan Product
+          </button>
+        </div>
       </div>
 
       {/* Stat cards */}
@@ -166,37 +182,6 @@ export default function DashboardPage() {
             </table>
           </div>
         )}
-      </div>
-
-      {/* Phase checklist */}
-      <div className="card">
-        <h3 className="font-semibold text-gray-900 mb-4">Development Progress</h3>
-        <ul className="space-y-2 text-sm">
-          {[
-            { phase: 'Phase 1',  label: 'Project setup, FastAPI, React, SQLite',     done: true },
-            { phase: 'Phase 2',  label: 'Authentication, Users, Roles',               done: true },
-            { phase: 'Phase 3',  label: 'Products, Variants, SKU, Barcode, Serial',   done: true },
-            { phase: 'Phase 4',  label: 'Suppliers, Purchases, Stock Receiving',      done: true },
-            { phase: 'Phase 5',  label: 'Inventory management',                       done: true },
-            { phase: 'Phase 6',  label: 'Phone camera barcode scanner',               done: true },
-            { phase: 'Phase 7',  label: 'Customers',                                  done: true },
-            { phase: 'Phase 8',  label: 'POS / Sales',                                done: true },
-            { phase: 'Phase 9',  label: 'Invoice / Memo PDF',                         done: true },
-            { phase: 'Phase 10', label: 'Warranty tracking',                          done: true },
-            { phase: 'Phase 11', label: 'Returns & Damaged products',                 done: true },
-            { phase: 'Phase 12', label: 'Dashboard charts & Reports',                 done: true },
-            { phase: 'Phase 13', label: 'Backup & Restore',                           done: true },
-          ].map((item) => (
-            <li key={item.phase} className="flex items-center gap-3">
-              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
-                ${item.done ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-                {item.done ? '✓' : '○'}
-              </span>
-              <span className={`font-medium ${item.done ? 'text-green-700' : 'text-gray-500'}`}>{item.phase}</span>
-              <span className="text-gray-500">{item.label}</span>
-            </li>
-          ))}
-        </ul>
       </div>
 
     </div>

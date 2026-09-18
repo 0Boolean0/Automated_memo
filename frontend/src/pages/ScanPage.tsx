@@ -12,7 +12,7 @@ import { useState, useCallback } from 'react'
 import {
   ScanLine, Search, Package, AlertTriangle,
   ArrowRight, RotateCcw, TrendingDown,
-  CheckCircle, Camera, Keyboard,
+  CheckCircle, Camera, Keyboard, Smartphone,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import BarcodeScanner from '@/components/scanner/BarcodeScanner'
@@ -95,6 +95,16 @@ export default function ScanPage() {
       <div>
         <h2 className="text-xl font-bold text-gray-900">Scan Product</h2>
         <p className="text-sm text-gray-500 mt-0.5">Look up any product by barcode, SKU, or name</p>
+      </div>
+
+      {/* Phone scanning tip banner */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-3 flex items-center justify-between gap-3 text-xs text-blue-800">
+        <div className="flex items-center gap-2">
+          <Smartphone size={16} className="text-blue-600 flex-shrink-0" />
+          <span>
+            <strong>Phone Scanning:</strong> Use <strong>iVCam</strong> on your phone &amp; PC to scan barcodes wirelessly!
+          </span>
+        </div>
       </div>
 
       {/* Mode tabs */}

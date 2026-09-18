@@ -16,8 +16,11 @@ import { z } from 'zod'
 import {
   ChevronRight, ChevronLeft, Check, Plus, Trash2,
   Loader2, Users, Package, Tag, ClipboardList, Star,
+  ScanLine,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import Modal from '@/components/ui/Modal'
+import BarcodeScanner from '@/components/scanner/BarcodeScanner'
 import { customerService, type CustomerListItem } from '@/services/customerService'
 import { productService, type Product, type ProductVariant } from '@/services/productService'
 import { saleService, type SaleItemCreate } from '@/services/saleService'
@@ -165,12 +168,55 @@ function StepCart({
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
   const [qty, setQty] = useState(1)
+  const [showScanModal, setShowScanModal] = useState(false)
 
   useEffect(() => {
     productService.list({ per_page: 200, is_active: true })
       .then(r => setProducts(r.items as unknown as Product[]))
       .catch(() => toast.error('Failed to load products'))
   }, [])
+
+  const handleBarcodeScan = async (barcode: string) => {
+    try {
+      const res = await productService.scan({ barcode })
+      if (!res) {
+        toast.error(`Barcode ${barcode} not found`)
+        return
+      }
+      let p = products.find(prod => prod.id === res.product_id)
+      if (!p) {
+        p = await productService.get(res.product_id)
+      }
+      const v = p?.variants?.find(varnt => varnt.id === res.variant_id)
+      if (!v || !p) {
+        toast.error('Product variant not found')
+        return
+      }
+      if (v.current_stock <= 0) {
+        toast.error(`${p.name} (${v.name}) is out of stock!`)
+        return
+      }
+
+      const existing = cart.findIndex(i => i.variant.id === v.id)
+      if (existing >= 0) {
+        const updated = [...cart]
+        updated[existing].quantity += 1
+        onUpdateCart(updated)
+      } else {
+        onUpdateCart([...cart, {
+          variant: v,
+          product: p,
+          quantity: 1,
+          unit_price: Number(v.selling_price),
+          discount: 0,
+          serials: [],
+        }])
+      }
+      toast.success(`Scanned & added: ${p.name} (${v.name})`)
+    } catch {
+      toast.error(`Barcode "${barcode}" not found`)
+    }
+  }
 
   const addToCart = () => {
     if (!selectedVariant || !selectedProduct) return
@@ -219,7 +265,16 @@ function StepCart({
     <div className="space-y-5">
       {/* Add item */}
       <div className="card space-y-3">
-        <p className="font-semibold text-gray-700 text-sm">Add Item</p>
+        <div className="flex items-center justify-between">
+          <p className="font-semibold text-gray-700 text-sm">Add Item</p>
+          <button
+            type="button"
+            onClick={() => setShowScanModal(true)}
+            className="px-3 py-1.5 rounded-lg border border-primary-200 bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
+          >
+            <ScanLine size={14} /> Scan Barcode (Camera / iVCam)
+          </button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div>
             <label className="label">Product</label>
@@ -370,6 +425,30 @@ function StepCart({
           Next: Serials <ChevronRight size={16} />
         </button>
       </div>
+
+      {/* Barcode Scanner Modal for POS */}
+      <Modal
+        isOpen={showScanModal}
+        onClose={() => setShowScanModal(false)}
+        title="Scan Barcode into Cart (Webcam / Phone iVCam)"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            Hold a product barcode in front of your camera or phone (via iVCam) to automatically add it to the cart.
+          </p>
+          <BarcodeScanner onScan={handleBarcodeScan} />
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => setShowScanModal(false)}
+            >
+              Done Scanning
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

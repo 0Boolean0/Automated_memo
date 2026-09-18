@@ -102,9 +102,9 @@ class VariantResponse(BaseModel):
     barcode: Optional[str] = None
     cost_price: Decimal
     selling_price: Decimal
-    warranty_months: int
-    reorder_level: int
-    current_stock: int
+    warranty_months: int = 0
+    reorder_level: int = 5
+    current_stock: int = 0
     other_specs: Optional[dict[str, Any]] = None
     is_active: bool
     created_at: datetime
