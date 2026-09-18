@@ -81,6 +81,7 @@ class VariantUpdate(BaseModel):
     selling_price: Optional[Decimal] = None
     warranty_months: Optional[int] = None
     reorder_level: Optional[int] = None
+    current_stock: Optional[int] = None
     other_specs: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
 

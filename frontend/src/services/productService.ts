@@ -143,6 +143,7 @@ export interface UpdateVariantPayload {
   selling_price?: number
   warranty_months?: number
   reorder_level?: number
+  current_stock?: number
   other_specs?: Record<string, string>
   is_active?: boolean
 }

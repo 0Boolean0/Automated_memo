@@ -78,6 +78,7 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
           selling_price:   Number(v.selling_price),
           warranty_months: v.warranty_months,
           reorder_level:   v.reorder_level,
+          initial_stock:   v.current_stock,
         })),
       })
     } else {
@@ -102,7 +103,10 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
         for (let i = 0; i < data.variants.length; i++) {
           const vData = data.variants[i]
           if (editProduct.variants[i]) {
-            await productService.updateVariant(editProduct.variants[i].id, vData)
+            await productService.updateVariant(editProduct.variants[i].id, {
+              ...vData,
+              current_stock: vData.initial_stock,
+            })
           } else {
             await productService.addVariant(editProduct.id, vData)
           }
@@ -256,18 +260,18 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
                     <input type="number" className="input" placeholder="5" {...register(`variants.${index}.reorder_level`)} />
                   </div>
 
-                  {!isEdit && (
-                    <div>
-                      <label className="label text-primary-700 font-semibold">Initial Stock (Units)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="input border-primary-300 focus:ring-primary-500 font-medium"
-                        placeholder="0"
-                        {...register(`variants.${index}.initial_stock`)}
-                      />
-                    </div>
-                  )}
+                  <div>
+                    <label className="label text-primary-700 font-semibold">
+                      {isEdit ? 'Stock (Units)' : 'Initial Stock (Units)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      className="input border-primary-300 focus:ring-primary-500 font-medium"
+                      placeholder="0"
+                      {...register(`variants.${index}.initial_stock`)}
+                    />
+                  </div>
                 </div>
               </div>
             ))}

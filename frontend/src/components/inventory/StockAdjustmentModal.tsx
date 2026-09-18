@@ -10,7 +10,8 @@
  */
 
 import { useEffect, useState, useMemo } from 'react'
-import { Plus, Loader2, Search } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Loader2, Search, CheckCircle2, History, ArrowRight } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -53,9 +54,16 @@ interface Props {
 }
 
 export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted, onSaved, initialVariantId }: Props) {
+  const navigate = useNavigate()
   const [variants, setVariants] = useState<EnrichedVariant[]>([])
   const [variantSearch, setVariantSearch] = useState('')
   const [loadingVariants, setLoadingVariants] = useState(false)
+  const [successInfo, setSuccessInfo] = useState<{
+    productName: string
+    variantName: string
+    newStock: number
+    change: number
+  } | null>(null)
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting }, watch } = useForm<AdjustmentFormData>({
     resolver: zodResolver(adjustmentSchema),
@@ -77,11 +85,16 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted, onSa
 
   // Pre-select initialVariantId when modal opens or initialVariantId changes
   useEffect(() => {
-    if (isOpen && initialVariantId) {
-      reset(prev => ({
-        ...prev,
-        variant_id: initialVariantId,
-      }))
+    if (isOpen) {
+      setSuccessInfo(null)
+      if (initialVariantId) {
+        reset(prev => ({
+          ...prev,
+          variant_id: initialVariantId,
+        }))
+      }
+    } else {
+      setSuccessInfo(null)
     }
   }, [isOpen, initialVariantId, reset])
 
@@ -145,18 +158,81 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted, onSa
       }
 
       await inventoryService.createAdjustment(payload)
-      toast.success('Stock adjustment recorded')
-      reset()
+      const current = selectedVariant?.current_stock ?? 0
+      const updatedStock = Math.max(0, current + data.quantity_change)
+      
+      setSuccessInfo({
+        productName: selectedVariant?.product_name ?? 'Product',
+        variantName: selectedVariant?.name ?? 'Variant',
+        newStock: updatedStock,
+        change: data.quantity_change,
+      })
+
+      toast.success(`Stock adjusted! New stock: ${updatedStock} units`)
+      reset({
+        quantity_change: 1,
+        variant_id: undefined,
+      })
       setVariantSearch('')
-      onClose()
       onAdjusted?.()
       onSaved?.()
     } catch { /* interceptor */ }
   }
 
+  const handleClose = () => {
+    setSuccessInfo(null)
+    onClose()
+  }
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Adjust Stock" maxWidth="md">
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+    <Modal isOpen={isOpen} onClose={handleClose} title="Adjust Stock" maxWidth="md">
+      {successInfo ? (
+        <div className="space-y-5 text-center py-3">
+          <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
+            <CheckCircle2 size={26} />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">Stock Updated Successfully!</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              {successInfo.productName} — {successInfo.variantName}
+            </p>
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-800 text-sm font-semibold mt-3 border border-emerald-200">
+              <span>Updated Stock: {successInfo.newStock} units</span>
+              <span className="text-xs font-normal">
+                ({successInfo.change > 0 ? `+${successInfo.change}` : successInfo.change})
+              </span>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-gray-100 flex flex-col sm:flex-row gap-2 justify-center">
+            <button
+              type="button"
+              onClick={() => setSuccessInfo(null)}
+              className="btn-secondary text-xs flex items-center justify-center gap-1.5 py-2 px-3"
+            >
+              Adjust Another Product
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleClose()
+                navigate('/inventory/adjustments')
+              }}
+              className="btn-secondary text-xs flex items-center justify-center gap-1.5 py-2 px-3 text-blue-700 border-blue-200 hover:bg-blue-50"
+            >
+              <History size={14} /> View History
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="btn-primary text-xs flex items-center justify-center gap-1.5 py-2 px-4"
+            >
+              Done <ArrowRight size={14} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
 
         {/* ── Variant Selector ─────────────────────────────────────────── */}
         <div>
@@ -308,6 +384,7 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted, onSa
           </button>
         </div>
       </form>
+      )}
     </Modal>
   )
 }

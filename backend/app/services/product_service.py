@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from app.models.product import Category, Brand, Product, ProductVariant, PriceHistory
 from app.models.serial import SerialNumber
+from app.models.inventory import InventoryAdjustment, AdjustmentType
 from app.schemas.product import (
     CategoryCreate, CategoryUpdate,
     BrandCreate, BrandUpdate,
@@ -386,6 +387,47 @@ def update_variant(
         existing = db.query(ProductVariant).filter(ProductVariant.sku == data.sku).first()
         if existing:
             raise HTTPException(status_code=409, detail=f"SKU '{data.sku}' already exists")
+
+    # Handle current_stock edit if specified
+    if "current_stock" in changes:
+        new_stock = max(0, int(changes.pop("current_stock")))
+        diff = new_stock - variant.current_stock
+        if diff != 0:
+            adj = InventoryAdjustment(
+                business_id=business_id,
+                variant_id=variant.id,
+                adjustment_type=AdjustmentType.CORRECTION,
+                quantity_change=diff,
+                reason="Stock edited directly in product edit",
+                adjusted_by=user_id,
+            )
+            db.add(adj)
+
+            if variant.product and variant.product.is_serialized:
+                if diff > 0:
+                    sku_clean = (variant.sku or f"VAR{variant.id}").replace(" ", "").upper()
+                    date_str = datetime.now(timezone.utc).strftime("%y%m%d")
+                    existing_count = db.query(SerialNumber).filter_by(variant_id=variant.id).count()
+                    for i in range(1, diff + 1):
+                        sn = SerialNumber(
+                            business_id=business_id,
+                            variant_id=variant.id,
+                            serial=f"{sku_clean}-{date_str}-{existing_count + i:04d}",
+                            status="IN_STOCK",
+                            cost_price=variant.cost_price,
+                        )
+                        db.add(sn)
+                elif diff < 0:
+                    serials_to_update = (
+                        db.query(SerialNumber)
+                        .filter_by(variant_id=variant.id, status="IN_STOCK")
+                        .limit(abs(diff))
+                        .all()
+                    )
+                    for sn in serials_to_update:
+                        sn.status = "ADJUSTED"
+
+            variant.current_stock = new_stock
 
     for k, v in changes.items():
         setattr(variant, k, v)
