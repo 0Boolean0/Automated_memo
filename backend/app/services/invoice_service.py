@@ -85,7 +85,7 @@ class InvoicePDF(FPDF):
         self.set_y(-12)
         self.set_font("Helvetica", "", 8)
         self.set_text_color(130, 130, 130)
-        self.cell(0, 5, f"GizmoCrave Memo | Page {self.page_no()} | Thank you for choosing GizmoCrave!", align="C")
+        self.cell(0, 5, f"Gizmo Crave Memo | Page {self.page_no()} | Thank you for choosing Gizmo Crave!", align="C")
         self.set_text_color(0, 0, 0)
 
 
@@ -119,27 +119,34 @@ def generate_invoice_pdf(
         item_serials[item.id] = [sn.serial for sn in sns]
 
     # ── Build PDF ─────────────────────────────────────────────────────────
-    pdf = InvoicePDF(business_name=business.name or "GizmoCrave", currency=currency)
+    pdf = InvoicePDF(business_name=business.name or "Gizmo Crave", currency=currency)
     pdf.add_page()
     W = 182   # usable width (210 - 14*2)
 
     # ── Logo on Left ──────────────────────────────────────────────────────
-    logo_path = settings.STATIC_DIR / "gizmocrave_logo.png"
+    logo_path = settings.STATIC_DIR / "gizmocrave_badge.png"
     if not logo_path.exists():
-        app_static = Path(__file__).resolve().parent.parent / "static" / "gizmocrave_logo.png"
+        logo_path = settings.STATIC_DIR / "gizmocrave_logo.png"
+    if not logo_path.exists():
+        app_static = Path(__file__).resolve().parent.parent / "static" / "gizmocrave_badge.png"
         if app_static.exists():
             logo_path = app_static
+        else:
+            app_static = Path(__file__).resolve().parent.parent / "static" / "gizmocrave_logo.png"
+            if app_static.exists():
+                logo_path = app_static
 
     if logo_path.exists():
-        pdf.image(str(logo_path), x=14, y=14.5, w=54)
+        # Square badge logo: 28mm x 28mm
+        pdf.image(str(logo_path), x=14, y=14, w=28)
     else:
         pdf.set_xy(14, 15)
         pdf.set_font("Helvetica", "B", 18)
         pdf.set_text_color(15, 23, 42)
-        pdf.cell(60, 8, business.name or "GizmoCrave", ln=True)
+        pdf.cell(60, 8, business.name or "Gizmo Crave", ln=True)
 
     # ── Invoice title + number on Right ───────────────────────────────────
-    pdf.set_y(14.5)
+    pdf.set_y(14)
     pdf.set_font("Helvetica", "B", 20)
     pdf.set_text_color(37, 99, 235)
     pdf.cell(W, 8, "INVOICE / MEMO", ln=False, align="R")
@@ -154,7 +161,7 @@ def generate_invoice_pdf(
 
     # ── From / Bill To ───────────────────────────────────────────────────
     col = W // 2
-    y_addr = 35
+    y_addr = 46
     pdf.set_y(y_addr)
 
     # FROM
@@ -165,14 +172,13 @@ def generate_invoice_pdf(
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_x(14)
-    pdf.cell(col, 5, business.name or "GizmoCrave", ln=True)
+    pdf.cell(col, 5, business.name or "Gizmo Crave", ln=True)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(71, 85, 105)
     from_lines = [
-        business.address or "Dhaka, Bangladesh",
+        business.address if business.address else None,
         f"Phone: {business.phone}" if business.phone else None,
-        f"Email: {business.email}" if business.email else "Email: support@gizmocrave.com",
-        f"Web: {business.website}" if business.website else "Web: https://gizmocrave.com",
+        f"Email: {business.email}" if business.email else "Email: gizmocrave@gmail.com",
         f"TIN: {business.tax_number}" if business.tax_number else None,
     ]
     for line in from_lines:
