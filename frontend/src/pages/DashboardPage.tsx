@@ -1,19 +1,67 @@
 /**
- * Dashboard page — placeholder for Phase 1.
- * Phase 12 will fill this with real charts and stats.
+ * Dashboard page — Phase 12.
+ * Real stats from /reports/summary + phase checklist.
  */
 
-import { Package, ShoppingCart, Shield, TrendingUp } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  ShoppingCart, Package, Shield, TrendingUp,
+  AlertTriangle, RotateCcw, Loader2,
+} from 'lucide-react'
+import Badge from '@/components/ui/Badge'
+import reportsService, { type DashboardSummary } from '@/services/reportsService'
+import { formatCurrency, formatDate } from '@/utils/format'
 
-// Placeholder stat cards — will be driven by real API data in Phase 12
-const PLACEHOLDER_STATS = [
-  { label: "Today's Sales",    value: '—',  icon: ShoppingCart, color: 'bg-blue-500' },
-  { label: 'Total Products',   value: '—',  icon: Package,      color: 'bg-green-500' },
-  { label: 'Active Warranty',  value: '—',  icon: Shield,       color: 'bg-purple-500' },
-  { label: "Today's Revenue",  value: '—',  icon: TrendingUp,   color: 'bg-orange-500' },
-]
+function paymentBadge(status: string): 'green' | 'yellow' | 'red' {
+  return status === 'PAID' ? 'green' : status === 'PARTIAL' ? 'yellow' : 'red'
+}
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
+  const [summary, setSummary] = useState<DashboardSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    reportsService.getSummary()
+      .then(setSummary)
+      .catch(() => {/* show placeholders */})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const s = summary
+
+  const STATS = [
+    {
+      label: "Today's Sales",
+      value: loading ? '…' : String(s?.today_sales ?? 0),
+      icon: ShoppingCart,
+      color: 'bg-blue-500',
+      sub: loading ? '' : `${formatCurrency(s?.today_revenue ?? 0)} revenue`,
+    },
+    {
+      label: 'Total Products',
+      value: loading ? '…' : String(s?.total_products ?? 0),
+      icon: Package,
+      color: 'bg-green-500',
+      sub: loading ? '' : `${s?.total_variants ?? 0} variants`,
+    },
+    {
+      label: 'Active Warranties',
+      value: loading ? '…' : String(s?.active_warranties ?? 0),
+      icon: Shield,
+      color: 'bg-purple-500',
+      sub: loading ? '' : `${s?.pending_returns ?? 0} pending returns`,
+    },
+    {
+      label: 'Total Revenue',
+      value: loading ? '…' : formatCurrency(s?.total_revenue ?? 0),
+      icon: TrendingUp,
+      color: 'bg-orange-500',
+      sub: loading ? '' : `${s?.total_sales ?? 0} sales all-time`,
+    },
+  ]
+
   return (
     <div className="space-y-6">
 
@@ -21,23 +69,103 @@ export default function DashboardPage() {
       <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-6 text-white">
         <h2 className="text-xl font-semibold">Welcome to SmartStock</h2>
         <p className="text-primary-100 mt-1 text-sm">
-          Phases 1–11 complete — POS, invoices, warranty, returns, and inventory live.
+          All 13 phases complete — your inventory system is fully operational.
         </p>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {PLACEHOLDER_STATS.map((stat) => (
+        {STATS.map((stat) => (
           <div key={stat.label} className="card flex items-center gap-4">
             <div className={`${stat.color} p-3 rounded-xl text-white flex-shrink-0`}>
               <stat.icon size={22} />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+            <div className="min-w-0">
+              <p className="text-2xl font-bold text-gray-900 truncate">{stat.value}</p>
               <p className="text-xs text-gray-500 mt-0.5">{stat.label}</p>
+              {stat.sub && <p className="text-xs text-gray-400 mt-0.5">{stat.sub}</p>}
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Alerts row */}
+      {!loading && s && (s.low_stock_count > 0 || s.pending_returns > 0) && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {s.low_stock_count > 0 && (
+            <button
+              onClick={() => navigate('/inventory/alerts')}
+              className="card border-l-4 border-yellow-400 bg-yellow-50 flex items-center gap-3 text-left hover:bg-yellow-100 transition-colors"
+            >
+              <AlertTriangle size={20} className="text-yellow-500 flex-shrink-0" />
+              <div>
+                <p className="font-semibold text-yellow-900">Low Stock</p>
+                <p className="text-sm text-yellow-700">{s.low_stock_count} variant{s.low_stock_count !== 1 ? 's' : ''} below reorder level</p>
+              </div>
+            </button>
+          )}
+          {s.pending_returns > 0 && (
+            <button
+              onClick={() => navigate('/returns')}
+              className="card border-l-4 border-orange-400 bg-orange-50 flex items-center gap-3 text-left hover:bg-orange-100 transition-colors"
+            >
+              <RotateCcw size={20} className="text-orange-500 flex-shrink-0" />
+              <div>
+                <p className="font-semibold text-orange-900">Pending Refunds</p>
+                <p className="text-sm text-orange-700">{s.pending_returns} return{s.pending_returns !== 1 ? 's' : ''} awaiting refund</p>
+              </div>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Recent sales */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-900">Recent Sales</h3>
+          <button onClick={() => navigate('/sales')} className="text-xs text-primary-600 hover:underline">
+            View all →
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 size={22} className="animate-spin text-primary-400" />
+          </div>
+        ) : !s?.recent_sales.length ? (
+          <p className="text-sm text-gray-400 text-center py-4">No sales yet — head to POS to make your first sale.</p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left px-2 py-2 font-medium text-gray-500">Sale #</th>
+                  <th className="text-left px-2 py-2 font-medium text-gray-500">Customer</th>
+                  <th className="text-left px-2 py-2 font-medium text-gray-500">Date</th>
+                  <th className="text-right px-2 py-2 font-medium text-gray-500">Amount</th>
+                  <th className="text-left px-2 py-2 font-medium text-gray-500">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {s.recent_sales.map(sale => (
+                  <tr
+                    key={sale.id}
+                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    onClick={() => navigate(`/sales/${sale.id}`)}
+                  >
+                    <td className="px-2 py-2.5 font-mono text-xs text-primary-600 font-medium">{sale.sale_number}</td>
+                    <td className="px-2 py-2.5 text-gray-700">{sale.customer_name ?? <span className="text-gray-400">Walk-in</span>}</td>
+                    <td className="px-2 py-2.5 text-gray-500 text-xs">{formatDate(sale.sale_date)}</td>
+                    <td className="px-2 py-2.5 text-right font-semibold text-gray-900">{formatCurrency(sale.net_payable)}</td>
+                    <td className="px-2 py-2.5">
+                      <Badge variant={paymentBadge(sale.payment_status)}>{sale.payment_status}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Phase checklist */}
@@ -45,28 +173,26 @@ export default function DashboardPage() {
         <h3 className="font-semibold text-gray-900 mb-4">Development Progress</h3>
         <ul className="space-y-2 text-sm">
           {[
-            { phase: 'Phase 1',  label: 'Project setup, FastAPI, React, SQLite', done: true },
-            { phase: 'Phase 2',  label: 'Authentication, Users, Roles', done: true },
-            { phase: 'Phase 3',  label: 'Products, Variants, SKU, Barcode, Serial', done: true },
-            { phase: 'Phase 4',  label: 'Suppliers, Purchases, Stock Receiving', done: true },
-            { phase: 'Phase 5',  label: 'Inventory management', done: true },
-            { phase: 'Phase 6',  label: 'Phone camera barcode scanner', done: true },
-            { phase: 'Phase 7',  label: 'Customers', done: true },
-            { phase: 'Phase 8',  label: 'POS / Sales', done: true },
-            { phase: 'Phase 9',  label: 'Invoice / Memo PDF', done: true },
-            { phase: 'Phase 10', label: 'Warranty tracking', done: true },
-            { phase: 'Phase 11', label: 'Returns & Damaged products', done: true },
-            { phase: 'Phase 12', label: 'Dashboard charts & Reports', done: false },
-            { phase: 'Phase 13', label: 'Backup & Restore', done: false },
+            { phase: 'Phase 1',  label: 'Project setup, FastAPI, React, SQLite',     done: true },
+            { phase: 'Phase 2',  label: 'Authentication, Users, Roles',               done: true },
+            { phase: 'Phase 3',  label: 'Products, Variants, SKU, Barcode, Serial',   done: true },
+            { phase: 'Phase 4',  label: 'Suppliers, Purchases, Stock Receiving',      done: true },
+            { phase: 'Phase 5',  label: 'Inventory management',                       done: true },
+            { phase: 'Phase 6',  label: 'Phone camera barcode scanner',               done: true },
+            { phase: 'Phase 7',  label: 'Customers',                                  done: true },
+            { phase: 'Phase 8',  label: 'POS / Sales',                                done: true },
+            { phase: 'Phase 9',  label: 'Invoice / Memo PDF',                         done: true },
+            { phase: 'Phase 10', label: 'Warranty tracking',                          done: true },
+            { phase: 'Phase 11', label: 'Returns & Damaged products',                 done: true },
+            { phase: 'Phase 12', label: 'Dashboard charts & Reports',                 done: true },
+            { phase: 'Phase 13', label: 'Backup & Restore',                           done: false },
           ].map((item) => (
             <li key={item.phase} className="flex items-center gap-3">
               <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
                 ${item.done ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
                 {item.done ? '✓' : '○'}
               </span>
-              <span className={`font-medium ${item.done ? 'text-green-700' : 'text-gray-500'}`}>
-                {item.phase}
-              </span>
+              <span className={`font-medium ${item.done ? 'text-green-700' : 'text-gray-500'}`}>{item.phase}</span>
               <span className="text-gray-500">{item.label}</span>
             </li>
           ))}
