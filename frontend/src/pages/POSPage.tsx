@@ -16,14 +16,15 @@ import { z } from 'zod'
 import {
   ChevronRight, ChevronLeft, Check, Plus, Trash2,
   Loader2, Users, Package, Tag, ClipboardList, Star,
-  ScanLine,
+  ScanLine, Printer, Download, Sparkles,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import api from '@/services/api'
 import Modal from '@/components/ui/Modal'
 import BarcodeScanner from '@/components/scanner/BarcodeScanner'
 import { customerService, type CustomerListItem } from '@/services/customerService'
 import { productService, type Product, type ProductVariant } from '@/services/productService'
-import { saleService, type SaleItemCreate } from '@/services/saleService'
+import { saleService, type SaleItemCreate, type Sale } from '@/services/saleService'
 import { formatCurrency } from '@/utils/format'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -464,12 +465,66 @@ function StepSerials({
   onNext: () => void
 }) {
   const serializedItems = cart.filter(i => i.product.is_serialized)
+  const [inStockMap, setInStockMap] = useState<Record<number, string[]>>({})
+  const [activeScanTarget, setActiveScanTarget] = useState<{ cartIdx: number; si: number } | null>(null)
+
+  // Fetch real in-stock serials for each serialized variant in cart
+  useEffect(() => {
+    let isMounted = true
+    const loadInStock = async () => {
+      const map: Record<number, string[]> = {}
+      for (const item of serializedItems) {
+        try {
+          const serials = await productService.getInStockSerials(item.variant.id)
+          map[item.variant.id] = serials
+        } catch {
+          map[item.variant.id] = []
+        }
+      }
+      if (isMounted) setInStockMap(map)
+    }
+    if (serializedItems.length > 0) {
+      loadInStock()
+    }
+    return () => { isMounted = false }
+  }, [cart])
 
   const handleChange = (cartIdx: number, si: number, value: string) => {
     const realIdx = cart.indexOf(serializedItems[cartIdx])
     const updated = [...cart[realIdx].serials]
     updated[si] = value.trim().toUpperCase()
     onUpdateSerials(realIdx, updated)
+  }
+
+  const handlePickSerial = (cartIdx: number, serial: string) => {
+    const realIdx = cart.indexOf(serializedItems[cartIdx])
+    const current = [...cart[realIdx].serials]
+    // Find first empty slot or replace
+    const emptyIdx = current.findIndex(s => !s || s.trim().length === 0)
+    if (emptyIdx >= 0) {
+      current[emptyIdx] = serial
+    } else {
+      current[0] = serial
+    }
+    onUpdateSerials(realIdx, current)
+  }
+
+  const handleAutoFill = (cartIdx: number) => {
+    const item = serializedItems[cartIdx]
+    const realIdx = cart.indexOf(item)
+    const available = inStockMap[item.variant.id] || []
+    if (available.length === 0) {
+      toast.error('No pre-registered in-stock serials found for this variant.')
+      return
+    }
+    const updated = Array(item.quantity).fill('')
+    for (let i = 0; i < item.quantity; i++) {
+      if (i < available.length) {
+        updated[i] = available[i]
+      }
+    }
+    onUpdateSerials(realIdx, updated)
+    toast.success(`Assigned ${Math.min(item.quantity, available.length)} in-stock serials`)
   }
 
   useEffect(() => {
@@ -494,40 +549,126 @@ function StepSerials({
         </div>
       ) : (
         serializedItems.map((item, cartIdx) => {
-          const realIdx = cart.indexOf(item)
+          const available = inStockMap[item.variant.id] || []
           return (
             <div key={cartIdx} className="card space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center text-blue-500 flex-shrink-0">
-                  <Tag size={17} />
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center text-blue-500 flex-shrink-0">
+                    <Tag size={17} />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900">{item.product.name}</p>
+                    <p className="text-xs text-gray-500">{item.variant.name} — {item.quantity} unit{item.quantity > 1 ? 's' : ''}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-semibold text-gray-900">{item.product.name}</p>
-                  <p className="text-xs text-gray-500">{item.variant.name} — {item.quantity} unit{item.quantity > 1 ? 's' : ''}</p>
-                </div>
+
+                {available.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleAutoFill(cartIdx)}
+                    className="px-2.5 py-1 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg flex items-center gap-1.5 transition-colors border border-blue-200"
+                  >
+                    <Sparkles size={13} className="text-blue-600" /> Auto-fill In-Stock
+                  </button>
+                )}
               </div>
+
+              {/* In-stock serial badges */}
+              {available.length > 0 && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Available In Stock ({available.length}):
+                    </span>
+                    <span className="text-[11px] text-slate-400">Click any serial to pick</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-0.5">
+                    {available.map(sn => {
+                      const isSelected = item.serials.includes(sn)
+                      return (
+                        <button
+                          key={sn}
+                          type="button"
+                          onClick={() => handlePickSerial(cartIdx, sn)}
+                          className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
+                            isSelected
+                              ? 'bg-blue-600 text-white font-semibold shadow-xs'
+                              : 'bg-white text-slate-700 border border-slate-200 hover:border-blue-400 hover:text-blue-600'
+                          }`}
+                        >
+                          {isSelected ? '✓ ' : '+ '} {sn}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Serial inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {Array.from({ length: item.quantity }).map((_, si) => (
-                  <div key={si} className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400 w-6 text-right flex-shrink-0">{si + 1}.</span>
+                  <div key={si} className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400 w-5 text-right flex-shrink-0">{si + 1}.</span>
                     <input
-                      className={`input text-sm font-mono uppercase ${
+                      className={`input text-sm font-mono uppercase flex-1 ${
                         (item.serials[si] || '').trim().length > 0 ? 'border-green-300 focus:ring-green-400' : ''
                       }`}
                       placeholder={`Serial #${si + 1}`}
                       value={item.serials[si] || ''}
                       onChange={e => handleChange(cartIdx, si, e.target.value)}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setActiveScanTarget({ cartIdx, si })}
+                      title="Scan barcode with camera / phone iVCam"
+                      className="p-2 border border-gray-200 rounded-lg text-gray-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                    >
+                      <ScanLine size={15} />
+                    </button>
                   </div>
                 ))}
               </div>
               <p className="text-xs text-gray-400">
-                {item.serials.filter(s => s.trim().length > 0).length} / {item.quantity} entered
+                {item.serials.filter(s => s.trim().length > 0).length} / {item.quantity} entered • Click a pill above, scan via camera, or type any serial on the box.
               </p>
             </div>
           )
         })
       )}
+
+      {/* Serial Barcode Scanner Modal */}
+      <Modal
+        isOpen={activeScanTarget !== null}
+        onClose={() => setActiveScanTarget(null)}
+        title="Scan Serial Barcode (Webcam / Phone iVCam)"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            Point camera at the serial number barcode on the box to scan it directly into the input.
+          </p>
+          <BarcodeScanner
+            onScan={(barcode) => {
+              if (activeScanTarget) {
+                handleChange(activeScanTarget.cartIdx, activeScanTarget.si, barcode)
+                toast.success(`Scanned serial: ${barcode}`)
+                setActiveScanTarget(null)
+              }
+            }}
+          />
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setActiveScanTarget(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <div className="flex justify-between pt-2">
         <button type="button" className="btn-secondary flex items-center gap-2" onClick={onBack}>
           <ChevronLeft size={16} /> Back
@@ -676,6 +817,8 @@ export default function POSPage() {
   })
   const [cart, setCart]       = useState<CartItem[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [completedSale, setCompletedSale] = useState<Sale | null>(null)
+  const [downloading, setDownloading] = useState(false)
 
   useEffect(() => {
     customerService.list({ per_page: 200 }).then(r => setCustomers(r.items))
@@ -683,6 +826,76 @@ export default function POSPage() {
 
   const updateSerials = (idx: number, serials: string[]) => {
     setCart(prev => { const c = [...prev]; c[idx] = { ...c[idx], serials }; return c })
+  }
+
+  const printInvoicePDF = async (saleObj: Sale) => {
+    setDownloading(true)
+    try {
+      const response = await api.get(`/sales/${saleObj.id}/invoice`, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+
+      // Use hidden iframe to reliably trigger native print dialog
+      const iframe = document.createElement('iframe')
+      iframe.style.position = 'fixed'
+      iframe.style.right = '0'
+      iframe.style.bottom = '0'
+      iframe.style.width = '0'
+      iframe.style.height = '0'
+      iframe.style.border = '0'
+      iframe.src = url
+      document.body.appendChild(iframe)
+      iframe.onload = () => {
+        setTimeout(() => {
+          iframe.focus()
+          try {
+            iframe.contentWindow?.print()
+          } catch {
+            window.open(url, '_blank')
+          }
+        }, 300)
+      }
+      toast.success('Opening print dialog…')
+    } catch {
+      toast.error('Failed to generate invoice for printing')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const downloadInvoicePDF = async (saleObj: Sale) => {
+    setDownloading(true)
+    try {
+      const response = await api.get(`/sales/${saleObj.id}/invoice`, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `invoice_${saleObj.sale_number}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Invoice PDF downloaded!')
+    } catch {
+      toast.error('Failed to download invoice PDF')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const startNewSale = () => {
+    setCompletedSale(null)
+    setCart([])
+    setDetails({
+      customer_id: null,
+      sale_date: today,
+      paid_amount: 0,
+      discount_amount: 0,
+      loyalty_points_redeemed: 0,
+      notes: '',
+    })
+    setStep(0)
   }
 
   const handleSubmit = async () => {
@@ -693,7 +906,7 @@ export default function POSPage() {
         quantity:   item.quantity,
         unit_price: item.unit_price,
         discount_amount: item.discount,
-        serials:    item.serials.map(s => ({ serial: s })),
+        serials:    item.serials.filter(Boolean).map(s => ({ serial: s })),
       }))
 
       const sale = await saleService.create({
@@ -707,9 +920,13 @@ export default function POSPage() {
       })
 
       toast.success(`Sale ${sale.sale_number} completed!`)
-      navigate(`/sales/${sale.id}`)
-    } catch { /* interceptor */ }
-    finally { setSubmitting(false) }
+      setCompletedSale(sale)
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to complete sale'
+      toast.error(typeof msg === 'string' ? msg : 'Failed to complete sale')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -756,6 +973,73 @@ export default function POSPage() {
           />
         )}
       </div>
+
+      {/* Sale Completion / Print & Download Modal */}
+      {completedSale && (
+        <Modal
+          isOpen={true}
+          onClose={() => navigate(`/sales/${completedSale.id}`)}
+          title="Sale Confirmed & Completed!"
+          maxWidth="md"
+        >
+          <div className="space-y-5 text-center py-2">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
+              <Check size={36} />
+            </div>
+
+            <div>
+              <span className="px-3 py-1 bg-blue-50 text-blue-700 font-mono text-xs rounded-full font-semibold">
+                Invoice #{completedSale.sale_number}
+              </span>
+              <h3 className="text-xl font-bold text-gray-900 mt-2">
+                Sale Recorded Successfully
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Net Payable: <span className="font-semibold text-gray-900">{formatCurrency(completedSale.net_payable)}</span> • Status:{' '}
+                <span className="font-semibold text-emerald-600">{completedSale.payment_status}</span>
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => printInvoicePDF(completedSale)}
+                disabled={downloading}
+                className="btn-primary flex items-center justify-center gap-2 py-3 text-sm shadow-sm"
+              >
+                {downloading ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />}
+                Print Memo
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadInvoicePDF(completedSale)}
+                disabled={downloading}
+                className="btn-secondary flex items-center justify-center gap-2 py-3 text-sm border-blue-200 text-blue-700 hover:bg-blue-50"
+              >
+                {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                Download PDF
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={startNewSale}
+                className="text-sm text-gray-600 hover:text-gray-900 font-medium flex items-center gap-1.5"
+              >
+                <Plus size={16} /> Start New Sale
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/sales/${completedSale.id}`)}
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1.5"
+              >
+                View Details <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

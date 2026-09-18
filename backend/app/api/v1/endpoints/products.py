@@ -146,3 +146,19 @@ def get_price_history(
     return product_service.get_variant_price_history(
         db, variant_id, current_user.business_id
     )
+
+
+@router.get("/variants/{variant_id}/serials/in-stock", response_model=list[str])
+def get_in_stock_serials(
+    variant_id: int,
+    current_user: User = Depends(require_permission("view_products")),
+    db: Session = Depends(get_db),
+):
+    from app.models.serial import SerialNumber
+    serials = db.query(SerialNumber.serial).filter(
+        SerialNumber.variant_id == variant_id,
+        SerialNumber.business_id == current_user.business_id,
+        SerialNumber.status == "IN_STOCK",
+    ).order_by(SerialNumber.id.asc()).all()
+    return [s[0] for s in serials]
+

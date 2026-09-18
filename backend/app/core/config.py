@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     # Business defaults
     # ─────────────────────────────────────────
     DEFAULT_CURRENCY: str = "BDT"
-    DEFAULT_BUSINESS_NAME: str = "My Gadget Shop"
+    DEFAULT_BUSINESS_NAME: str = "GizmoCrave"
 
     class Config:
         # If a .env file exists next to this project, load it automatically.

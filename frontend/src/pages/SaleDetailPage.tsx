@@ -67,10 +67,28 @@ export default function SaleDetailPage() {
     setDownloading(true)
     try {
       const response = await api.get(`/sales/${sale.id}/invoice`, { responseType: 'blob' })
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }))
-      const win = window.open(url, '_blank')
-      if (win) win.onload = () => { win.print(); window.URL.revokeObjectURL(url) }
-      else { window.URL.revokeObjectURL(url); toast.error('Allow pop-ups to print') }
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const iframe = document.createElement('iframe')
+      iframe.style.position = 'fixed'
+      iframe.style.right = '0'
+      iframe.style.bottom = '0'
+      iframe.style.width = '0'
+      iframe.style.height = '0'
+      iframe.style.border = '0'
+      iframe.src = url
+      document.body.appendChild(iframe)
+      iframe.onload = () => {
+        setTimeout(() => {
+          iframe.focus()
+          try {
+            iframe.contentWindow?.print()
+          } catch {
+            window.open(url, '_blank')
+          }
+        }, 300)
+      }
+      toast.success('Opening print dialog…')
     } catch {
       toast.error('Failed to generate invoice')
     } finally {

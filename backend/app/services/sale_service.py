@@ -142,18 +142,18 @@ def sell(
 
         is_serialized = variant.product.is_serialized
 
-        if is_serialized:
-            # Serial count must match quantity
-            if len(item_data.serials) != item_data.quantity:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"Variant '{variant.name}': quantity is {item_data.quantity} "
-                        f"but {len(item_data.serials)} serial(s) provided"
-                    ),
-                )
+        # Stock availability check for all items
+        if variant.current_stock < item_data.quantity:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Variant '{variant.name}': only {variant.current_stock} in stock, "
+                    f"requested {item_data.quantity}"
+                ),
+            )
 
-            serial_values = [s.serial.strip() for s in item_data.serials]
+        if is_serialized:
+            serial_values = [s.serial.strip() for s in item_data.serials if s.serial and s.serial.strip()]
 
             # No intra-request duplicates
             if len(serial_values) != len(set(serial_values)):
@@ -162,38 +162,73 @@ def sell(
                     detail=f"Variant '{variant.name}': duplicate serial numbers in request",
                 )
 
-            # All serials must exist, belong to this business+variant, and be IN_STOCK
+            # All serials: match existing or auto-register if new
             serial_objs: list[SerialNumber] = []
             for serial_str in serial_values:
                 sn = db.query(SerialNumber).filter(
                     SerialNumber.serial == serial_str,
                     SerialNumber.business_id == business_id,
-                    SerialNumber.variant_id == variant.id,
                 ).first()
                 if not sn:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Serial '{serial_str}' not found in this business",
+                    # Serial number does not exist yet; auto-register it since stock is available
+                    sn = SerialNumber(
+                        business_id=business_id,
+                        variant_id=variant.id,
+                        serial=serial_str,
+                        status="IN_STOCK",
+                        cost_price=variant.cost_price,
+                        created_at=now,
                     )
-                if sn.status not in ("IN_STOCK", "RESERVED"):
+                    db.add(sn)
+                    db.flush()
+                elif sn.variant_id != variant.id:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Serial '{serial_str}' belongs to another variant",
+                    )
+                elif sn.status not in ("IN_STOCK", "RESERVED"):
                     raise HTTPException(
                         status_code=422,
                         detail=f"Serial '{serial_str}' is {sn.status} — cannot sell",
                     )
                 serial_objs.append(sn)
 
+            # If fewer serials were entered than quantity, automatically fill from available in-stock serials
+            if len(serial_objs) < item_data.quantity:
+                needed = item_data.quantity - len(serial_objs)
+                used_ids = [s.id for s in serial_objs]
+                available_sns = db.query(SerialNumber).filter(
+                    SerialNumber.variant_id == variant.id,
+                    SerialNumber.business_id == business_id,
+                    SerialNumber.status == "IN_STOCK",
+                    ~SerialNumber.id.in_(used_ids) if used_ids else True,
+                ).order_by(SerialNumber.id.asc()).limit(needed).all()
+
+                for sn in available_sns:
+                    serial_objs.append(sn)
+
+                # If still need more serials (e.g. stock exists without pre-generated serial records)
+                remaining_needed = item_data.quantity - len(serial_objs)
+                if remaining_needed > 0:
+                    prefix = (variant.sku or "SN").replace(" ", "-").upper()
+                    date_part = now.strftime("%y%m%d")
+                    for i in range(remaining_needed):
+                        auto_serial = f"{prefix}-{date_part}-{int(now.timestamp()) % 10000:04d}-{i+1:02d}"
+                        sn = SerialNumber(
+                            business_id=business_id,
+                            variant_id=variant.id,
+                            serial=auto_serial,
+                            status="IN_STOCK",
+                            cost_price=variant.cost_price,
+                            created_at=now,
+                        )
+                        db.add(sn)
+                        db.flush()
+                        serial_objs.append(sn)
+
             validated_items.append((item_data, variant, serial_objs))
 
         else:
-            # Non-serialized: check sufficient stock
-            if variant.current_stock < item_data.quantity:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"Variant '{variant.name}': only {variant.current_stock} in stock, "
-                        f"requested {item_data.quantity}"
-                    ),
-                )
             validated_items.append((item_data, variant, []))
 
     # ── Create Sale ────────────────────────────────────────────────────────

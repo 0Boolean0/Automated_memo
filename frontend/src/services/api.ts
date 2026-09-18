@@ -109,10 +109,13 @@ api.interceptors.response.use(
         break
       }
 
-      case 404:
-        // 404s are common and often handled by the calling component
-        // Don't show a global toast for these
+      case 404: {
+        const detail = data?.detail
+        if (typeof detail === 'string') {
+          toast.error(detail)
+        }
         break
+      }
 
       case 422: {
         // FastAPI validation error — detail is an array of {msg, type} objects

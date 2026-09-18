@@ -199,4 +199,8 @@ export const productService = {
   /** Phase 6: Look up a variant by barcode or SKU (barcode scanner). */
   scan: (params: { barcode?: string; sku?: string }) =>
     api.get<ScanResult>('/products/scan', { params }).then(r => r.data),
+
+  /** Get available in-stock serial numbers for a variant. */
+  getInStockSerials: (variantId: number) =>
+    api.get<string[]>(`/products/variants/${variantId}/serials/in-stock`).then(r => r.data),
 }
