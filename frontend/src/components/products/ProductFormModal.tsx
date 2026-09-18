@@ -22,6 +22,7 @@ const variantSchema = z.object({
   selling_price:   z.coerce.number().min(0, 'Must be ≥ 0'),
   warranty_months: z.coerce.number().min(0).default(0),
   reorder_level:   z.coerce.number().min(0).default(5),
+  initial_stock:   z.coerce.number().min(0).default(0),
 })
 
 const productSchema = z.object({
@@ -54,7 +55,7 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
     resolver: zodResolver(productSchema),
     defaultValues: {
       is_serialized: 'true' as any,
-      variants: [{ name: 'Standard', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5 }],
+      variants: [{ name: 'Standard', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5, initial_stock: 0 }],
     },
   })
 
@@ -82,7 +83,7 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
     } else {
       reset({
         is_serialized: 'true' as any,
-        variants: [{ name: 'Standard', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5 }],
+        variants: [{ name: 'Standard', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5, initial_stock: 0 }],
       })
     }
   }, [editProduct, isOpen, reset])
@@ -191,7 +192,7 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
             </label>
             <button
               type="button"
-              onClick={() => append({ name: '', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5 })}
+              onClick={() => append({ name: '', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5, initial_stock: 0 })}
               className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1 font-medium"
             >
               <Plus size={13} /> Add Variant
@@ -254,6 +255,19 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
                     <label className="label">Reorder Level</label>
                     <input type="number" className="input" placeholder="5" {...register(`variants.${index}.reorder_level`)} />
                   </div>
+
+                  {!isEdit && (
+                    <div>
+                      <label className="label text-primary-700 font-semibold">Initial Stock (Units)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="input border-primary-300 focus:ring-primary-500 font-medium"
+                        placeholder="0"
+                        {...register(`variants.${index}.initial_stock`)}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

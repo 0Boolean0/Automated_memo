@@ -6,19 +6,20 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Search, Boxes, ChevronLeft, ChevronRight,
-  Loader2, Package, Barcode,
+  Loader2, Package, SlidersHorizontal,
 } from 'lucide-react'
 import Badge from '@/components/ui/Badge'
 import ProductFormModal from '@/components/products/ProductFormModal'
+import StockAdjustmentModal from '@/components/inventory/StockAdjustmentModal'
 import { useProducts } from '@/hooks/useProducts'
 import { useAuthStore } from '@/services/authStore'
-import { formatCurrency } from '@/utils/format'
 import type { Product } from '@/services/productService'
 
 export default function ProductsPage() {
   const navigate = useNavigate()
   const { hasPermission } = useAuthStore()
   const canCreate = hasPermission('create_product')
+  const canAdjust = hasPermission('adjust_inventory')
 
   const {
     data, loading, search, setSearch,
@@ -30,8 +31,16 @@ export default function ProductsPage() {
   } = useProducts()
 
   const [showCreate, setShowCreate] = useState(false)
+  const [stockFilter, setStockFilter] = useState<'ALL' | 'IN_STOCK' | 'OUT_OF_STOCK'>('ALL')
+  const [showAdjustment, setShowAdjustment] = useState(false)
+  const [selectedVariantId, setSelectedVariantId] = useState<number | undefined>(undefined)
 
-  const products = data?.items ?? []
+  const rawProducts = data?.items ?? []
+  const products = rawProducts.filter(p => {
+    if (stockFilter === 'IN_STOCK') return (p.total_stock ?? 0) > 0
+    if (stockFilter === 'OUT_OF_STOCK') return (p.total_stock ?? 0) === 0
+    return true
+  })
 
   return (
     <div className="space-y-5">
@@ -44,11 +53,24 @@ export default function ProductsPage() {
             {data ? `${data.total} products` : '…'}
           </p>
         </div>
-        {canCreate && (
-          <button className="btn-primary flex items-center gap-2" onClick={() => setShowCreate(true)}>
-            <Plus size={16} /> New Product
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {canAdjust && (
+            <button
+              className="btn-secondary flex items-center gap-2"
+              onClick={() => {
+                setSelectedVariantId(undefined)
+                setShowAdjustment(true)
+              }}
+            >
+              <SlidersHorizontal size={16} /> Adjust Stock
+            </button>
+          )}
+          {canCreate && (
+            <button className="btn-primary flex items-center gap-2" onClick={() => setShowCreate(true)}>
+              <Plus size={16} /> New Product
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
@@ -80,6 +102,16 @@ export default function ProductsPage() {
           <option value="">All Brands</option>
           {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+
+        <select
+          className="input w-auto min-w-[150px]"
+          value={stockFilter}
+          onChange={e => setStockFilter(e.target.value as 'ALL' | 'IN_STOCK' | 'OUT_OF_STOCK')}
+        >
+          <option value="ALL">All Stock Levels</option>
+          <option value="IN_STOCK">In Stock (&gt; 0)</option>
+          <option value="OUT_OF_STOCK">Out of Stock (0)</option>
+        </select>
       </div>
 
       {/* Table */}
@@ -110,6 +142,7 @@ export default function ProductsPage() {
                     <th className="text-left px-5 py-3 font-medium text-gray-600">Stock</th>
                     <th className="text-left px-5 py-3 font-medium text-gray-600">Type</th>
                     <th className="text-left px-5 py-3 font-medium text-gray-600">Status</th>
+                    <th className="text-right px-5 py-3 font-medium text-gray-600">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -133,8 +166,8 @@ export default function ProductsPage() {
                       </td>
                       <td className="px-5 py-3.5 text-gray-700">{p.variant_count ?? 0}</td>
                       <td className="px-5 py-3.5">
-                        <span className={`font-semibold ${(p.total_stock ?? 0) === 0 ? 'text-red-500' : 'text-gray-900'}`}>
-                          {p.total_stock ?? 0}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${(p.total_stock ?? 0) === 0 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                          {p.total_stock ?? 0} in stock
                         </span>
                       </td>
                       <td className="px-5 py-3.5">
@@ -146,6 +179,23 @@ export default function ProductsPage() {
                         <Badge variant={p.is_active ? 'green' : 'gray'}>
                           {p.is_active ? 'Active' : 'Inactive'}
                         </Badge>
+                      </td>
+                      <td className="px-5 py-3.5 text-right" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {canAdjust && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedVariantId(p.variants?.[0]?.id)
+                                setShowAdjustment(true)
+                              }}
+                              className="px-2.5 py-1 rounded text-xs font-medium text-gray-700 bg-gray-100 hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-1"
+                              title="Adjust Stock"
+                            >
+                              <SlidersHorizontal size={13} /> Adjust Stock
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -188,6 +238,17 @@ export default function ProductsPage() {
         onSaved={refetch}
         categories={categories}
         brands={brands}
+      />
+
+      {/* Stock Adjustment modal */}
+      <StockAdjustmentModal
+        isOpen={showAdjustment}
+        onClose={() => {
+          setShowAdjustment(false)
+          setSelectedVariantId(undefined)
+        }}
+        onSaved={refetch}
+        initialVariantId={selectedVariantId}
       />
     </div>
   )

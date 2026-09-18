@@ -8,11 +8,13 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Pencil, Loader2, Package, Barcode,
   TrendingUp, Shield, AlertTriangle, Plus, History,
+  SlidersHorizontal,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Badge from '@/components/ui/Badge'
 import Modal from '@/components/ui/Modal'
 import ProductFormModal from '@/components/products/ProductFormModal'
+import StockAdjustmentModal from '@/components/inventory/StockAdjustmentModal'
 import { productService, categoryService, brandService } from '@/services/productService'
 import type { Product, ProductVariant, PriceHistory, Category, Brand } from '@/services/productService'
 import { useAuthStore } from '@/services/authStore'
@@ -23,10 +25,13 @@ export default function ProductDetailPage() {
   const navigate = useNavigate()
   const { hasPermission } = useAuthStore()
   const canEdit = hasPermission('edit_product')
+  const canAdjust = hasPermission('adjust_inventory')
 
   const [product, setProduct] = useState<Product | null>(null)
   const [loading, setLoading] = useState(true)
   const [showEdit, setShowEdit] = useState(false)
+  const [showAdjustModal, setShowAdjustModal] = useState(false)
+  const [selectedVariantId, setSelectedVariantId] = useState<number | undefined>(undefined)
   const [priceHistory, setPriceHistory] = useState<PriceHistory[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [historyVariant, setHistoryVariant] = useState<ProductVariant | null>(null)
@@ -91,11 +96,24 @@ export default function ProductDetailPage() {
             {[product.brand_name, product.category_name].filter(Boolean).join(' · ') || 'No brand / category'}
           </p>
         </div>
-        {canEdit && (
-          <button onClick={() => setShowEdit(true)} className="btn-secondary flex items-center gap-2">
-            <Pencil size={15} /> Edit
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {canAdjust && (
+            <button
+              onClick={() => {
+                setSelectedVariantId(activeVariants[0]?.id)
+                setShowAdjustModal(true)
+              }}
+              className="btn-secondary flex items-center gap-2"
+            >
+              <SlidersHorizontal size={15} /> Adjust Stock
+            </button>
+          )}
+          {canEdit && (
+            <button onClick={() => setShowEdit(true)} className="btn-secondary flex items-center gap-2">
+              <Pencil size={15} /> Edit
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Description */}
@@ -179,13 +197,27 @@ export default function ProductDetailPage() {
                     {v.warranty_months ? `${v.warranty_months} mo` : '—'}
                   </td>
                   <td className="px-5 py-3.5">
-                    <button
-                      onClick={() => openPriceHistory(v)}
-                      className="p-1.5 rounded text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
-                      title="Price history"
-                    >
-                      <History size={14} />
-                    </button>
+                    <div className="flex items-center gap-1 justify-end">
+                      {canAdjust && (
+                        <button
+                          onClick={() => {
+                            setSelectedVariantId(v.id)
+                            setShowAdjustModal(true)
+                          }}
+                          className="p-1.5 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                          title="Adjust stock"
+                        >
+                          <SlidersHorizontal size={14} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => openPriceHistory(v)}
+                        className="p-1.5 rounded text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                        title="Price history"
+                      >
+                        <History size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -242,6 +274,17 @@ export default function ProductDetailPage() {
           </div>
         )}
       </Modal>
+
+      {/* Stock Adjustment modal */}
+      <StockAdjustmentModal
+        isOpen={showAdjustModal}
+        onClose={() => {
+          setShowAdjustModal(false)
+          setSelectedVariantId(undefined)
+        }}
+        onSaved={fetchProduct}
+        initialVariantId={selectedVariantId}
+      />
     </div>
   )
 }

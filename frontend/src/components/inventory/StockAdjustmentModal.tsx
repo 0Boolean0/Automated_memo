@@ -39,14 +39,21 @@ const adjustmentSchema = z.object({
 
 type AdjustmentFormData = z.infer<typeof adjustmentSchema>
 
+interface EnrichedVariant extends ProductVariant {
+  product_name?: string
+  brand_name?: string | null
+}
+
 interface Props {
   isOpen: boolean
   onClose: () => void
   onAdjusted?: () => void
+  onSaved?: () => void
+  initialVariantId?: number
 }
 
-export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted }: Props) {
-  const [variants, setVariants] = useState<ProductVariant[]>([])
+export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted, onSaved, initialVariantId }: Props) {
+  const [variants, setVariants] = useState<EnrichedVariant[]>([])
   const [variantSearch, setVariantSearch] = useState('')
   const [loadingVariants, setLoadingVariants] = useState(false)
 
@@ -54,6 +61,7 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted }: Pr
     resolver: zodResolver(adjustmentSchema),
     defaultValues: {
       quantity_change: 1,
+      variant_id: initialVariantId,
     },
   })
 
@@ -67,6 +75,16 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted }: Pr
     [selectedVariantId, variants]
   )
 
+  // Pre-select initialVariantId when modal opens or initialVariantId changes
+  useEffect(() => {
+    if (isOpen && initialVariantId) {
+      reset(prev => ({
+        ...prev,
+        variant_id: initialVariantId,
+      }))
+    }
+  }, [isOpen, initialVariantId, reset])
+
   // Load all variants once
   useEffect(() => {
     if (!isOpen) return
@@ -74,14 +92,19 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted }: Pr
     const loadVariants = async () => {
       setLoadingVariants(true)
       try {
-        let allVariants: ProductVariant[] = []
+        let allVariants: EnrichedVariant[] = []
         let page = 1
         let hasMore = true
 
         while (hasMore) {
           const result = await productService.list({ page, per_page: 100 })
           for (const product of result.items) {
-            allVariants = allVariants.concat(product.variants ?? [])
+            const enriched = (product.variants ?? []).map(v => ({
+              ...v,
+              product_name: product.name,
+              brand_name: product.brand_name,
+            }))
+            allVariants = allVariants.concat(enriched)
           }
           hasMore = page < result.pages
           page++
@@ -105,7 +128,9 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted }: Pr
     const search = variantSearch.toLowerCase()
     return variants.filter(v => 
       v.name?.toLowerCase().includes(search) ||
-      v.sku?.toLowerCase().includes(search)
+      v.sku?.toLowerCase().includes(search) ||
+      v.product_name?.toLowerCase().includes(search) ||
+      (v.brand_name && v.brand_name.toLowerCase().includes(search))
     )
   }, [variants, variantSearch])
 
@@ -125,6 +150,7 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted }: Pr
       setVariantSearch('')
       onClose()
       onAdjusted?.()
+      onSaved?.()
     } catch { /* interceptor */ }
   }
 
@@ -152,11 +178,15 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted }: Pr
             disabled={loadingVariants}
           >
             <option value="">— Select Variant —</option>
-            {filteredVariants.map(v => (
-              <option key={v.id} value={v.id}>
-                {v.name} (SKU: {v.sku || 'N/A'}) - Current: {v.current_stock}
-              </option>
-            ))}
+            {filteredVariants.map(v => {
+              const brandPrefix = v.brand_name ? `${v.brand_name} · ` : ''
+              const prodPrefix = v.product_name ? `${v.product_name} — ` : ''
+              return (
+                <option key={v.id} value={v.id}>
+                  {brandPrefix}{prodPrefix}{v.name} {v.sku ? `(${v.sku})` : ''} · Stock: {v.current_stock}
+                </option>
+              )
+            })}
           </select>
           {errors.variant_id && <p className="mt-1 text-xs text-red-600">{errors.variant_id.message}</p>}
 

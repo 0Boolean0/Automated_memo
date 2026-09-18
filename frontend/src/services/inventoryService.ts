@@ -69,7 +69,7 @@ const inventoryService = {
    * @returns Created adjustment record
    */
   async createAdjustment(data: AdjustmentCreate): Promise<AdjustmentResponse> {
-    const { data: response } = await api.post<AdjustmentResponse>('/adjustments', data)
+    const { data: response } = await api.post<AdjustmentResponse>('/adjustments/', data)
     return response
   },
 
@@ -86,7 +86,7 @@ const inventoryService = {
     per_page?: number
   }): Promise<PaginatedResponse<AdjustmentResponse>> {
     const { data } = await api.get<PaginatedResponse<AdjustmentResponse>>(
-      '/adjustments',
+      '/adjustments/',
       { params }
     )
     return data

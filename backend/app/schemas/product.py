@@ -63,6 +63,7 @@ class VariantCreate(BaseModel):
     selling_price: Decimal = Decimal("0")
     warranty_months: int = 0
     reorder_level: int = 5
+    initial_stock: Optional[int] = 0
     other_specs: Optional[dict[str, Any]] = None
 
     @field_validator("cost_price", "selling_price")

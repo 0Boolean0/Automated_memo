@@ -24,6 +24,7 @@ from app.services import inventory_service
 router = APIRouter()
 
 
+@router.post("", include_in_schema=False)
 @router.post("/", response_model=AdjustmentResponse, status_code=201, tags=["Inventory"])
 def create_adjustment(
     data: AdjustmentCreate,
@@ -51,12 +52,13 @@ def create_adjustment(
     return inventory_service._build_adjustment_response(adjustment)
 
 
+@router.get("", include_in_schema=False)
 @router.get("/", response_model=dict, tags=["Inventory"])
 def list_adjustments(
     variant_id: Optional[int] = Query(None),
     adjustment_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    per_page: int = Query(20, ge=1, le=500),
     current_user: User = Depends(require_permission("view_inventory")),
     db: Session = Depends(get_db),
 ):
@@ -67,7 +69,7 @@ def list_adjustments(
     - variant_id: Filter by specific variant
     - adjustment_type: Filter by type (PHYSICAL_COUNT, DAMAGE, LOSS, etc.)
     - page: Page number (1-indexed)
-    - per_page: Items per page (1-100)
+    - per_page: Items per page (1-500)
 
     Returns paginated list with total count and metadata.
     """
@@ -81,21 +83,10 @@ def list_adjustments(
     )
 
 
-@router.get("/{adjustment_id}", response_model=AdjustmentResponse, tags=["Inventory"])
-def get_adjustment(
-    adjustment_id: int,
-    current_user: User = Depends(require_permission("view_inventory")),
-    db: Session = Depends(get_db),
-):
-    """Get a single adjustment by ID with full details."""
-    adjustment = inventory_service.get_adjustment(db, adjustment_id, current_user.business_id)
-    return inventory_service._build_adjustment_response(adjustment)
-
-
 @router.get("/alerts/low-stock", response_model=dict, tags=["Inventory"])
 def list_low_stock_alerts(
     page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    per_page: int = Query(20, ge=1, le=500),
     current_user: User = Depends(require_permission("view_inventory")),
     db: Session = Depends(get_db),
 ):
@@ -117,3 +108,15 @@ def list_low_stock_alerts(
     return inventory_service.list_low_stock_alerts(
         db, current_user.business_id, page=page, per_page=per_page
     )
+
+
+@router.get("/{adjustment_id}", response_model=AdjustmentResponse, tags=["Inventory"])
+def get_adjustment(
+    adjustment_id: int,
+    current_user: User = Depends(require_permission("view_inventory")),
+    db: Session = Depends(get_db),
+):
+    """Get a single adjustment by ID with full details."""
+    adjustment = inventory_service.get_adjustment(db, adjustment_id, current_user.business_id)
+    return inventory_service._build_adjustment_response(adjustment)
+

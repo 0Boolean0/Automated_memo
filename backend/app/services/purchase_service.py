@@ -201,9 +201,9 @@ def receive_stock(
                     notes=serial_input.notes,
                 )
                 db.add(sn)
-        else:
-            # Non-serialized: just bump current_stock
-            variant.current_stock += item_data.quantity
+
+        # Always bump current_stock for all variants (both serialized and non-serialized)
+        variant.current_stock += item_data.quantity
 
         # Also update variant cost price to latest received cost
         variant.cost_price = item_data.unit_cost

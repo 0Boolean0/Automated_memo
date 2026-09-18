@@ -88,7 +88,15 @@ class Product(TimestampMixin, Base):
     @property
     def total_stock(self) -> int:
         """Sum of current_stock across all active variants."""
-        return sum(v.current_stock for v in self.variants if v.is_active)
+        total = 0
+        for v in self.variants:
+            if not v.is_active:
+                continue
+            if self.is_serialized:
+                total += max(v.current_stock, v.in_stock_count)
+            else:
+                total += v.current_stock
+        return total
 
     def __repr__(self):
         return f"<Product id={self.id} name='{self.name}'>"

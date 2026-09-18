@@ -240,8 +240,9 @@ def sell(
                 sn.status = "SOLD"
                 sn.sold_at = now
                 sn.sale_item_id = sale_item.id
-        else:
-            variant.current_stock -= item_data.quantity
+
+        # Always decrement current_stock for all variants (both serialized and non-serialized)
+        variant.current_stock -= item_data.quantity
 
         grand_total += line_total
 

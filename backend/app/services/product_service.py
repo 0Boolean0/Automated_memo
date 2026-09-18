@@ -96,15 +96,14 @@ def _build_product_response(product: Product) -> ProductResponse:
     """Convert ORM Product → ProductResponse, attaching computed fields."""
     variants_out = []
     for v in product.variants:
-        in_stock = (
-            db_count := 0  # default for non-serialized
-        )
+        in_stock = 0
         if product.is_serialized:
             try:
                 in_stock = v.serials.filter_by(status="IN_STOCK").count()
             except Exception:
                 in_stock = 0
 
+        stock_val = max(v.current_stock, in_stock) if product.is_serialized else v.current_stock
         vr = VariantResponse(
             id=v.id,
             product_id=v.product_id,
@@ -115,7 +114,7 @@ def _build_product_response(product: Product) -> ProductResponse:
             selling_price=v.selling_price,
             warranty_months=v.warranty_months,
             reorder_level=v.reorder_level,
-            current_stock=v.current_stock,
+            current_stock=stock_val,
             other_specs=v.other_specs,
             is_active=v.is_active,
             created_at=v.created_at,
@@ -200,12 +199,11 @@ def list_products(
                     cost_price=v.cost_price,
                     selling_price=v.selling_price,
                     warranty_months=v.warranty_months,
-                    reorder_level=v.reorder_level,
-                    current_stock=v.current_stock,
+                    current_stock=max(v.current_stock, v.in_stock_count) if p.is_serialized else v.current_stock,
                     other_specs=v.other_specs,
                     is_active=v.is_active,
                     created_at=v.created_at,
-                    in_stock_serials=0,
+                    in_stock_serials=v.in_stock_count if p.is_serialized else 0,
                 )
                 for v in p.variants if v.is_active
             ],
@@ -268,7 +266,9 @@ def create_product(
     db.add(product)
     db.flush()
 
+    now = datetime.now(timezone.utc)
     for vdata in data.variants:
+        init_stock = max(0, getattr(vdata, 'initial_stock', 0) or 0)
         variant = ProductVariant(
             product_id=product.id,
             name=vdata.name,
@@ -278,9 +278,25 @@ def create_product(
             selling_price=vdata.selling_price,
             warranty_months=vdata.warranty_months,
             reorder_level=vdata.reorder_level,
+            current_stock=init_stock,
             other_specs=vdata.other_specs,
         )
         db.add(variant)
+        db.flush()
+
+        if init_stock > 0 and product.is_serialized:
+            clean_sku = (vdata.sku or "SN").strip().upper()
+            for i in range(init_stock):
+                sn = SerialNumber(
+                    business_id=business_id,
+                    variant_id=variant.id,
+                    serial=f"{clean_sku}-{now.strftime('%y%m%d')}-{i+1:04d}",
+                    status="IN_STOCK",
+                    cost_price=vdata.cost_price,
+                    received_at=now,
+                    notes="Initial stock on product creation",
+                )
+                db.add(sn)
 
     db.commit()
     db.refresh(product)
