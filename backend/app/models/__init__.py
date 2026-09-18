@@ -10,3 +10,4 @@ from app.models.inventory import InventoryAdjustment, AdjustmentType
 from app.models.customer import Customer
 from app.models.sale import Sale, SaleItem
 from app.models.warranty import WarrantyClaim
+from app.models.return_ import Return, ReturnItem

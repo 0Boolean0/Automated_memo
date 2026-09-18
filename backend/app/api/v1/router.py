@@ -5,7 +5,7 @@ from app.api.v1.endpoints import (
     health, auth, users, roles, business,
     categories, products,
     suppliers, purchases, inventory,
-    customers, sales, warranty,
+    customers, sales, warranty, returns,
 )
 
 api_router = APIRouter()
@@ -23,3 +23,4 @@ api_router.include_router(inventory.router,  prefix="/adjustments", tags=["inven
 api_router.include_router(customers.router,  prefix="/customers",   tags=["customers"])
 api_router.include_router(sales.router,      prefix="/sales",       tags=["sales"])
 api_router.include_router(warranty.router,   prefix="/warranty",    tags=["warranty"])
+api_router.include_router(returns.router,    prefix="/returns",     tags=["returns"])
