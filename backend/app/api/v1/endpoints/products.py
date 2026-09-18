@@ -36,7 +36,7 @@ def list_products(
     brand_id:    Optional[int]  = Query(None),
     is_active:   Optional[bool] = Query(True),
     page:        int            = Query(1, ge=1),
-    per_page:    int            = Query(20, ge=1, le=100),
+    per_page:    int            = Query(20, ge=1, le=500),
     current_user: User = Depends(require_permission("view_products")),
     db: Session = Depends(get_db),
 ):

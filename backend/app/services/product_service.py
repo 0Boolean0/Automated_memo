@@ -163,7 +163,12 @@ def list_products(
     if brand_id:
         query = query.filter(Product.brand_id == brand_id)
     if search:
-        query = query.filter(Product.name.ilike(f"%{search}%"))
+        query = query.outerjoin(Product.brand).filter(
+            or_(
+                Product.name.ilike(f"%{search}%"),
+                Brand.name.ilike(f"%{search}%"),
+            )
+        )
 
     total = query.count()
     products = (
@@ -185,6 +190,25 @@ def list_products(
             total_stock=p.total_stock,
             variant_count=len(p.variants),
             created_at=p.created_at,
+            variants=[
+                VariantResponse(
+                    id=v.id,
+                    product_id=v.product_id,
+                    name=v.name,
+                    sku=v.sku,
+                    barcode=v.barcode,
+                    cost_price=v.cost_price,
+                    selling_price=v.selling_price,
+                    warranty_months=v.warranty_months,
+                    reorder_level=v.reorder_level,
+                    current_stock=v.current_stock,
+                    other_specs=v.other_specs,
+                    is_active=v.is_active,
+                    created_at=v.created_at,
+                    in_stock_serials=0,
+                )
+                for v in p.variants if v.is_active
+            ],
         ))
 
     import math

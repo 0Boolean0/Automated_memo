@@ -6,7 +6,7 @@
  *   Step 4: Review & confirm
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -14,10 +14,11 @@ import { z } from 'zod'
 import {
   ChevronRight, ChevronLeft, Check, Plus, Trash2,
   Loader2, Truck, Package, Tag, ClipboardList,
+  Search, X, UserPlus, Building,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supplierService, type SupplierListItem } from '@/services/supplierService'
-import { productService, categoryService, type Product, type ProductVariant } from '@/services/productService'
+import { productService, type Product, type ProductVariant } from '@/services/productService'
 import { purchaseService, type PurchaseItemCreate } from '@/services/purchaseService'
 import { formatCurrency } from '@/utils/format'
 
@@ -72,43 +73,380 @@ const detailSchema = z.object({
 type DetailForm = z.infer<typeof detailSchema>
 
 function StepDetails({
-  suppliers, defaultValues, onNext,
-}: { suppliers: SupplierListItem[]; defaultValues: DetailForm; onNext: (d: DetailForm) => void }) {
+  suppliers, defaultValues, onNext, onSupplierCreated,
+}: {
+  suppliers: SupplierListItem[]
+  defaultValues: DetailForm
+  onNext: (d: DetailForm) => void
+  onSupplierCreated: (s: SupplierListItem) => void
+}) {
   const form = useForm<DetailForm>({ resolver: zodResolver(detailSchema), defaultValues })
+  const selectedSupplierId = form.watch('supplier_id')
+
+  const [vendorSearch, setVendorSearch] = useState('')
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [creatingVendor, setCreatingVendor] = useState(false)
+  const [showQuickModal, setShowQuickModal] = useState(false)
+  const [quickForm, setQuickForm] = useState({ name: '', company: '', phone: '', email: '', address: '' })
+
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Find currently selected supplier object
+  const currentSupplier = useMemo(() => {
+    if (!selectedSupplierId) return null
+    return suppliers.find(s => s.id === Number(selectedSupplierId)) ?? null
+  }, [suppliers, selectedSupplierId])
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Filter suppliers by typed query
+  const filteredSuppliers = useMemo(() => {
+    const q = vendorSearch.trim().toLowerCase()
+    if (!q) return suppliers
+    return suppliers.filter(s =>
+      s.name.toLowerCase().includes(q) ||
+      (s.company && s.company.toLowerCase().includes(q)) ||
+      (s.phone && s.phone.includes(q))
+    )
+  }, [suppliers, vendorSearch])
+
+  // Exact match check
+  const hasExactMatch = useMemo(() => {
+    const q = vendorSearch.trim().toLowerCase()
+    if (!q) return false
+    return suppliers.some(s => s.name.trim().toLowerCase() === q)
+  }, [suppliers, vendorSearch])
+
+  // Quick inline creation for typed name
+  const handleQuickCreate = async (nameToCreate?: string) => {
+    const name = (nameToCreate || vendorSearch).trim()
+    if (!name) return
+    setCreatingVendor(true)
+    try {
+      const created = await supplierService.create({ name })
+      toast.success(`Supplier "${created.name}" created!`)
+      onSupplierCreated(created)
+      form.setValue('supplier_id', created.id)
+      setVendorSearch('')
+      setIsDropdownOpen(false)
+    } catch {
+      toast.error('Failed to create supplier')
+    } finally {
+      setCreatingVendor(false)
+    }
+  }
+
+  // Quick Modal creation with extra fields
+  const handleModalCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!quickForm.name.trim()) {
+      toast.error('Supplier name is required')
+      return
+    }
+    setCreatingVendor(true)
+    try {
+      const created = await supplierService.create({
+        name: quickForm.name.trim(),
+        company: quickForm.company.trim() || undefined,
+        phone: quickForm.phone.trim() || undefined,
+        email: quickForm.email.trim() || undefined,
+        address: quickForm.address.trim() || undefined,
+      })
+      toast.success(`Supplier "${created.name}" created!`)
+      onSupplierCreated(created)
+      form.setValue('supplier_id', created.id)
+      setShowQuickModal(false)
+      setQuickForm({ name: '', company: '', phone: '', email: '', address: '' })
+      setVendorSearch('')
+      setIsDropdownOpen(false)
+    } catch {
+      toast.error('Failed to create supplier')
+    } finally {
+      setCreatingVendor(false)
+    }
+  }
+
+  const handleSelectSupplier = (id: number | null) => {
+    form.setValue('supplier_id', id)
+    setIsDropdownOpen(false)
+    setVendorSearch('')
+  }
+
   return (
-    <form onSubmit={form.handleSubmit(onNext)} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2">
-          <label className="label">Supplier</label>
-          <select className="input" {...form.register('supplier_id')}>
-            <option value="">— Walk-in / Unknown —</option>
-            {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}{s.company ? ` (${s.company})` : ''}</option>)}
-          </select>
+    <>
+      <form onSubmit={form.handleSubmit(onNext)} className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          {/* Supplier / Vendor Searchable Field */}
+          <div className="col-span-2" ref={dropdownRef}>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="label mb-0">Supplier / Vendor / Distributor</label>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickForm(prev => ({ ...prev, name: vendorSearch }))
+                  setShowQuickModal(true)
+                }}
+                className="text-xs font-medium text-primary-600 hover:text-primary-700 flex items-center gap-1"
+              >
+                <UserPlus size={13} /> + New Vendor
+              </button>
+            </div>
+
+            {currentSupplier ? (
+              /* Selected supplier pill display */
+              <div className="flex items-center justify-between p-2.5 bg-blue-50/60 border border-primary-200 rounded-lg">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-md bg-primary-100 text-primary-700 flex items-center justify-center flex-shrink-0">
+                    <Building size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-900 text-sm truncate">
+                      {currentSupplier.name}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {currentSupplier.company ? `Company: ${currentSupplier.company}` : 'Registered Supplier'}
+                      {currentSupplier.phone ? ` · ${currentSupplier.phone}` : ''}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDropdownOpen(true)
+                    }}
+                    className="text-xs text-primary-600 hover:text-primary-800 font-medium px-2 py-1 rounded hover:bg-primary-100/50"
+                  >
+                    Change
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectSupplier(null)}
+                    className="text-gray-400 hover:text-red-600 p-1 rounded-md"
+                    title="Remove supplier (set to Walk-in)"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Search / Type input when no supplier selected */
+              <div className="relative">
+                <div className="relative">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    className="input pl-9 pr-8"
+                    placeholder="Type vendor or distributor name to search or add…"
+                    value={vendorSearch}
+                    onChange={e => {
+                      setVendorSearch(e.target.value)
+                      setIsDropdownOpen(true)
+                    }}
+                    onFocus={() => setIsDropdownOpen(true)}
+                  />
+                  {vendorSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setVendorSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Dropdown menu */}
+                {isDropdownOpen && (
+                  <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-60 flex flex-col">
+                    <div className="overflow-y-auto flex-1 divide-y divide-gray-50">
+                      {/* Walk-in Option */}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSupplier(null)}
+                        className="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm text-gray-700 flex items-center justify-between"
+                      >
+                        <span className="text-gray-500 font-medium">— Walk-in / Unknown —</span>
+                        <span className="text-xs text-gray-400">No linked supplier</span>
+                      </button>
+
+                      {/* Matching suppliers */}
+                      {filteredSuppliers.map(s => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => handleSelectSupplier(s.id)}
+                          className="w-full text-left px-3 py-2.5 hover:bg-primary-50 transition-colors text-sm flex items-center justify-between group"
+                        >
+                          <div>
+                            <p className="font-medium text-gray-900 group-hover:text-primary-700">{s.name}</p>
+                            {s.company && <p className="text-xs text-gray-500">{s.company}</p>}
+                          </div>
+                          {s.phone && <span className="text-xs text-gray-400">{s.phone}</span>}
+                        </button>
+                      ))}
+
+                      {filteredSuppliers.length === 0 && (
+                        <div className="px-3 py-2.5 text-center text-xs text-gray-400">
+                          No existing supplier matches "{vendorSearch}"
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Quick Create typed vendor option */}
+                    {vendorSearch.trim().length > 0 && !hasExactMatch && (
+                      <div className="p-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-2">
+                        <span className="text-xs text-gray-600 truncate">
+                          Not found: <strong>{vendorSearch.trim()}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          disabled={creatingVendor}
+                          onClick={() => handleQuickCreate()}
+                          className="btn-primary text-xs py-1 px-2.5 flex items-center gap-1 flex-shrink-0"
+                        >
+                          {creatingVendor ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                          Add "{vendorSearch.trim()}"
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="label">Purchase Date *</label>
+            <input type="date" className="input" {...form.register('purchase_date')} />
+            {form.formState.errors.purchase_date && <p className="mt-1 text-xs text-red-600">{form.formState.errors.purchase_date.message}</p>}
+          </div>
+          <div>
+            <label className="label">Supplier Invoice / Challan #</label>
+            <input className="input" placeholder="Optional" {...form.register('invoice_number')} />
+          </div>
+          <div>
+            <label className="label">Amount Paid (৳)</label>
+            <input type="number" step="0.01" className="input" placeholder="0" {...form.register('paid_amount')} />
+          </div>
+          <div className="col-span-2">
+            <label className="label">Notes</label>
+            <textarea className="input" rows={2} placeholder="Optional notes…" {...form.register('notes')} />
+          </div>
         </div>
-        <div>
-          <label className="label">Purchase Date *</label>
-          <input type="date" className="input" {...form.register('purchase_date')} />
-          {form.formState.errors.purchase_date && <p className="mt-1 text-xs text-red-600">{form.formState.errors.purchase_date.message}</p>}
+
+        <div className="flex justify-end pt-2">
+          <button type="submit" className="btn-primary flex items-center gap-2">
+            Next: Add Products <ChevronRight size={16} />
+          </button>
         </div>
-        <div>
-          <label className="label">Supplier Invoice / Challan #</label>
-          <input className="input" placeholder="Optional" {...form.register('invoice_number')} />
+      </form>
+
+      {/* Quick Add Vendor Modal */}
+      {showQuickModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <Building size={18} className="text-primary-600" /> Add New Supplier / Vendor
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowQuickModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleModalCreate} className="space-y-3 text-sm">
+              <div>
+                <label className="label">Vendor / Supplier Name *</label>
+                <input
+                  type="text"
+                  required
+                  className="input"
+                  placeholder="e.g. Acme Tech Distributors"
+                  value={quickForm.name}
+                  onChange={e => setQuickForm({ ...quickForm, name: e.target.value })}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="label">Company Name</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g. Acme Corp"
+                  value={quickForm.company}
+                  onChange={e => setQuickForm({ ...quickForm, company: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="label">Phone</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="017..."
+                    value={quickForm.phone}
+                    onChange={e => setQuickForm({ ...quickForm, phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Email</label>
+                  <input
+                    type="email"
+                    className="input"
+                    placeholder="vendor@mail.com"
+                    value={quickForm.email}
+                    onChange={e => setQuickForm({ ...quickForm, email: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Address</label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="Vendor address..."
+                  value={quickForm.address}
+                  onChange={e => setQuickForm({ ...quickForm, address: e.target.value })}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowQuickModal(false)}
+                  disabled={creatingVendor}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary flex items-center gap-1.5"
+                  disabled={creatingVendor}
+                >
+                  {creatingVendor ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                  Save & Select
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-        <div>
-          <label className="label">Amount Paid (৳)</label>
-          <input type="number" step="0.01" className="input" placeholder="0" {...form.register('paid_amount')} />
-        </div>
-        <div className="col-span-2">
-          <label className="label">Notes</label>
-          <textarea className="input" rows={2} placeholder="Optional notes…" {...form.register('notes')} />
-        </div>
-      </div>
-      <div className="flex justify-end pt-2">
-        <button type="submit" className="btn-primary flex items-center gap-2">
-          Next: Add Products <ChevronRight size={16} />
-        </button>
-      </div>
-    </form>
+      )}
+    </>
   )
 }
 
@@ -123,19 +461,82 @@ function StepProducts({
   onBack: () => void
   onNext: () => void
 }) {
-  const [products, setProducts]         = useState<Product[]>([])
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
-  const [quantity, setQuantity]         = useState(1)
-  const [unitCost, setUnitCost]         = useState(0)
-  const [loadingProducts, setLoadingProducts] = useState(true)
+  const [products, setProducts]                 = useState<Product[]>([])
+  const [selectedProduct, setSelectedProduct]   = useState<Product | null>(null)
+  const [selectedVariant, setSelectedVariant]   = useState<ProductVariant | null>(null)
+  const [quantity, setQuantity]                 = useState(1)
+  const [unitCost, setUnitCost]                 = useState(0)
+  const [loadingProducts, setLoadingProducts]   = useState(true)
+  const [productSearch, setProductSearch]       = useState('')
+  const [loadingVariant, setLoadingVariant]     = useState(false)
 
   useEffect(() => {
-    productService.list({ per_page: 200 }).then(r => {
-      setProducts(r.items as unknown as Product[])
-      setLoadingProducts(false)
-    })
+    setLoadingProducts(true)
+    productService.list({ per_page: 200 })
+      .then(r => {
+        setProducts(r.items as unknown as Product[])
+      })
+      .catch(() => {
+        toast.error('Failed to load products')
+      })
+      .finally(() => {
+        setLoadingProducts(false)
+      })
   }, [])
+
+  // Filter products by typed search (name, brand, or category)
+  const filteredProducts = useMemo(() => {
+    const q = productSearch.trim().toLowerCase()
+    if (!q) return products
+    return products.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      (p.brand_name && p.brand_name.toLowerCase().includes(q)) ||
+      (p.category_name && p.category_name.toLowerCase().includes(q))
+    )
+  }, [products, productSearch])
+
+  // Handle product selection
+  const handleProductChange = async (productIdStr: string) => {
+    const id = Number(productIdStr)
+    if (!id) {
+      setSelectedProduct(null)
+      setSelectedVariant(null)
+      setUnitCost(0)
+      return
+    }
+
+    const p = products.find(x => x.id === id) ?? null
+    if (!p) return
+
+    setSelectedProduct(p)
+    setSelectedVariant(null)
+    setUnitCost(0)
+
+    // Check if variants exist on p
+    let variants = p.variants || []
+    if (!variants || variants.length === 0) {
+      // Fallback: fetch full product details with variants
+      setLoadingVariant(true)
+      try {
+        const full = await productService.get(p.id)
+        variants = full.variants || []
+        p.variants = variants
+        setSelectedProduct({ ...p, variants })
+      } catch {
+        toast.error('Failed to fetch product variants')
+      } finally {
+        setLoadingVariant(false)
+      }
+    }
+
+    // If product has exactly 1 active variant, auto-select it!
+    const activeVariants = variants.filter(v => v.is_active)
+    if (activeVariants.length === 1) {
+      const v = activeVariants[0]
+      setSelectedVariant(v)
+      setUnitCost(Number(v.cost_price) || 0)
+    }
+  }
 
   const addToCart = () => {
     if (!selectedProduct || !selectedVariant) { toast.error('Select a product and variant'); return }
@@ -159,25 +560,55 @@ function StepProducts({
     <div className="space-y-5">
       {/* Add item row */}
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
-        <p className="text-sm font-semibold text-gray-700">Add Product</p>
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-gray-700">Add Product to Receiving List</p>
+          {products.length > 5 && (
+            <div className="relative w-64">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                className="input text-xs py-1.5 pl-8 pr-7"
+                placeholder="Filter by brand or name…"
+                value={productSearch}
+                onChange={e => setProductSearch(e.target.value)}
+              />
+              {productSearch && (
+                <button
+                  type="button"
+                  onClick={() => setProductSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="col-span-2">
-            <label className="label">Product</label>
+            <label className="label">Product (Brand — Name)</label>
             <select
               className="input"
               value={selectedProduct?.id ?? ''}
-              onChange={e => {
-                const p = products.find(x => x.id === Number(e.target.value)) ?? null
-                setSelectedProduct(p)
-                setSelectedVariant(null)
-                setUnitCost(0)
-              }}
+              disabled={loadingProducts}
+              onChange={e => handleProductChange(e.target.value)}
             >
-              <option value="">— Select Product —</option>
-              {loadingProducts
-                ? <option disabled>Loading…</option>
-                : products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)
-              }
+              <option value="">
+                {loadingProducts ? '— Loading Products… —' : '— Select Product —'}
+              </option>
+              {loadingProducts ? (
+                <option disabled>Loading…</option>
+              ) : (
+                filteredProducts.map(p => {
+                  const brandText = p.brand_name ? `${p.brand_name} — ` : ''
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {brandText}{p.name}
+                    </option>
+                  )
+                })
+              )}
             </select>
           </div>
 
@@ -186,16 +617,24 @@ function StepProducts({
             <select
               className="input"
               value={selectedVariant?.id ?? ''}
-              disabled={!selectedProduct}
+              disabled={!selectedProduct || loadingVariant}
               onChange={e => {
                 const v = selectedProduct?.variants?.find(x => x.id === Number(e.target.value)) ?? null
                 setSelectedVariant(v)
                 if (v) setUnitCost(Number(v.cost_price) || 0)
               }}
             >
-              <option value="">— Select Variant —</option>
+              <option value="">
+                {loadingVariant
+                  ? 'Loading variants…'
+                  : !selectedProduct
+                  ? '— Select Product First —'
+                  : '— Select Variant —'}
+              </option>
               {selectedProduct?.variants?.filter(v => v.is_active).map(v => (
-                <option key={v.id} value={v.id}>{v.name} {v.sku ? `(${v.sku})` : ''}</option>
+                <option key={v.id} value={v.id}>
+                  {v.name} {v.sku ? `(${v.sku})` : ''} — Cost: {formatCurrency(v.cost_price)}
+                </option>
               ))}
             </select>
           </div>
@@ -242,7 +681,9 @@ function StepProducts({
               {cart.map((item, i) => (
                 <tr key={i}>
                   <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900">{item.product.name}</p>
+                    <p className="font-medium text-gray-900">
+                      {item.product.brand_name ? `${item.product.brand_name} — ` : ''}{item.product.name}
+                    </p>
                     <p className="text-xs text-gray-400">{item.variant.name}</p>
                   </td>
                   <td className="px-4 py-3 text-gray-700">{item.quantity}</td>
@@ -339,7 +780,9 @@ function StepSerials({
                   <Tag size={17} />
                 </div>
                 <div>
-                  <p className="font-semibold text-gray-900">{item.product.name}</p>
+                  <p className="font-semibold text-gray-900">
+                    {item.product.brand_name ? `${item.product.brand_name} — ` : ''}{item.product.name}
+                  </p>
                   <p className="text-xs text-gray-500">{item.variant.name} — {item.quantity} unit{item.quantity > 1 ? 's' : ''}</p>
                 </div>
               </div>
@@ -427,7 +870,9 @@ function StepConfirm({
           {cart.map((item, i) => (
             <div key={i} className="px-4 py-3 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-900 text-sm">{item.product.name}</p>
+                <p className="font-medium text-gray-900 text-sm">
+                  {item.product.brand_name ? `${item.product.brand_name} — ` : ''}{item.product.name}
+                </p>
                 <p className="text-xs text-gray-500">{item.variant.name} {item.variant.sku ? `· ${item.variant.sku}` : ''}</p>
                 {item.product.is_serialized && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
@@ -489,8 +934,14 @@ export default function ReceiveStockPage() {
   const [cart, setCart] = useState<CartItem[]>([])
 
   useEffect(() => {
-    supplierService.list({ per_page: 200 }).then(r => setSuppliers(r.items))
+    supplierService.list({ per_page: 200 })
+      .then(r => setSuppliers(r.items))
+      .catch(() => toast.error('Failed to load suppliers'))
   }, [])
+
+  const handleSupplierCreated = (newSupplier: SupplierListItem) => {
+    setSuppliers(prev => [newSupplier, ...prev])
+  }
 
   const handleAddItem = (item: CartItem) => {
     setCart(prev => [...prev, item])
@@ -550,6 +1001,7 @@ export default function ReceiveStockPage() {
         <StepDetails
           suppliers={suppliers}
           defaultValues={details}
+          onSupplierCreated={handleSupplierCreated}
           onNext={d => { setDetails(d); setStep(1) }}
         />
       )}

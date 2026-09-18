@@ -155,7 +155,7 @@ class ProductResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 class ProductListResponse(BaseModel):
-    """Lightweight product summary for list views — no nested variants."""
+    """Product summary for list views — includes active variants."""
     id: int
     name: str
     is_serialized: bool
@@ -165,6 +165,7 @@ class ProductListResponse(BaseModel):
     total_stock: int = 0
     variant_count: int = 0
     created_at: datetime
+    variants: list[VariantResponse] = []
     model_config = {"from_attributes": True}
 
 

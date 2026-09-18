@@ -167,7 +167,9 @@ function StepCart({
   const [qty, setQty] = useState(1)
 
   useEffect(() => {
-    productService.list({ per_page: 200, is_active: true }).then(r => setProducts(r.items))
+    productService.list({ per_page: 200, is_active: true })
+      .then(r => setProducts(r.items as unknown as Product[]))
+      .catch(() => toast.error('Failed to load products'))
   }, [])
 
   const addToCart = () => {
@@ -231,7 +233,11 @@ function StepCart({
               }}
             >
               <option value="">— Select Product —</option>
-              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {products.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.brand_name ? `${p.brand_name} — ` : ''}{p.name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -242,12 +248,12 @@ function StepCart({
               disabled={!selectedProduct}
               value={selectedVariant?.id ?? ''}
               onChange={e => {
-                const v = selectedProduct?.variants.find(x => x.id === Number(e.target.value)) ?? null
+                const v = selectedProduct?.variants?.find(x => x.id === Number(e.target.value)) ?? null
                 setSelectedVariant(v)
               }}
             >
               <option value="">— Select Variant —</option>
-              {selectedProduct?.variants.filter(v => v.is_active).map(v => (
+              {selectedProduct?.variants?.filter(v => v.is_active).map(v => (
                 <option key={v.id} value={v.id} disabled={v.current_stock === 0}>
                   {v.name} — {v.current_stock} in stock — {formatCurrency(v.selling_price)}
                 </option>
