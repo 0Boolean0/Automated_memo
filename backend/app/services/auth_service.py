@@ -174,6 +174,16 @@ def change_password(
     db.commit()
 
 
+def reset_user_password(
+    db: Session,
+    user: User,
+    new_password: str,
+) -> None:
+    """Admin resets a user's password directly."""
+    user.hashed_password = hash_password(new_password)
+    db.commit()
+
+
 def deactivate_user(db: Session, user: User, requesting_user: User) -> User:
     """Soft-delete: set is_active=False. Cannot deactivate yourself."""
     if user.id == requesting_user.id:

@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { UserPlus, Pencil, UserX, Loader2, ShieldCheck } from 'lucide-react'
+import { UserPlus, Pencil, UserX, Loader2, ShieldCheck, KeyRound, Eye, EyeOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import Modal from '@/components/ui/Modal'
@@ -54,6 +54,13 @@ export default function UsersPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [editUser, setEditUser]   = useState<User | null>(null)
   const [deactivateUser, setDeactivateUser] = useState<User | null>(null)
+
+  // Password reset modal state
+  const [passwordUser, setPasswordUser] = useState<User | null>(null)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [savingPassword, setSavingPassword] = useState(false)
 
   // ── Fetch users + roles ────────────────────────────────────────────────────
   const fetchData = async () => {
@@ -130,6 +137,32 @@ export default function UsersPage() {
       toast.success(`User '${deactivateUser.username}' deactivated`)
       fetchData()
     } catch { /* interceptor shows toast */ }
+  }
+
+  // ── Change Password ────────────────────────────────────────────────────────
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!passwordUser) return
+    if (newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match')
+      return
+    }
+    setSavingPassword(true)
+    try {
+      await userService.changePassword(passwordUser.id, newPassword)
+      toast.success(`Password changed for @${passwordUser.username}`)
+      setPasswordUser(null)
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch {
+      /* interceptor shows toast */
+    } finally {
+      setSavingPassword(false)
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -224,6 +257,17 @@ export default function UsersPage() {
                           title="Edit user"
                         >
                           <Pencil size={15} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setPasswordUser(u)
+                            setNewPassword('')
+                            setConfirmPassword('')
+                          }}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                          title="Change / Reset password"
+                        >
+                          <KeyRound size={15} />
                         </button>
                         {u.id !== currentUser?.id && u.is_active && (
                           <button
@@ -324,14 +368,104 @@ export default function UsersPage() {
                 <label htmlFor="is_active" className="text-sm text-gray-700">Active account</label>
               </div>
             </div>
-            <div className="flex gap-3 pt-2 justify-end">
-              <button type="button" className="btn-secondary" onClick={() => setEditUser(null)}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={editForm.formState.isSubmitting}>
-                {editForm.formState.isSubmitting ? <Loader2 size={16} className="animate-spin" /> : 'Save Changes'}
+            <div className="flex gap-3 pt-2 justify-between items-center border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => {
+                  const u = editUser
+                  setEditUser(null)
+                  setPasswordUser(u)
+                  setNewPassword('')
+                  setConfirmPassword('')
+                }}
+                className="text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-colors"
+              >
+                <KeyRound size={13} />
+                Change Password
               </button>
+              <div className="flex gap-2">
+                <button type="button" className="btn-secondary" onClick={() => setEditUser(null)}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={editForm.formState.isSubmitting}>
+                  {editForm.formState.isSubmitting ? <Loader2 size={16} className="animate-spin" /> : 'Save Changes'}
+                </button>
+              </div>
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* ── Change User Password Modal ─────────────────────────────────────── */}
+      <Modal
+        isOpen={!!passwordUser}
+        onClose={() => {
+          setPasswordUser(null)
+          setNewPassword('')
+          setConfirmPassword('')
+        }}
+        title={`Change Password — @${passwordUser?.username}`}
+        maxWidth="sm"
+      >
+        <form onSubmit={handlePasswordSubmit} className="space-y-4">
+          <p className="text-xs text-gray-500">
+            Set a new password for <span className="font-semibold text-gray-800">{passwordUser?.full_name || passwordUser?.username}</span> (@{passwordUser?.username}).
+          </p>
+
+          <div>
+            <label className="label">New Password *</label>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="input pr-10"
+                placeholder="Min. 6 characters"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                minLength={6}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Confirm New Password *</label>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              className="input"
+              placeholder="Confirm new password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+            {confirmPassword && newPassword !== confirmPassword && (
+              <p className="text-xs text-red-500 mt-1">Passwords do not match</p>
+            )}
+          </div>
+
+          <div className="flex gap-2 justify-end pt-3 border-t border-gray-100">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setPasswordUser(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={savingPassword || newPassword.length < 6 || newPassword !== confirmPassword}
+              className="btn-primary flex items-center gap-1.5"
+            >
+              {savingPassword && <Loader2 size={14} className="animate-spin" />}
+              Save Password
+            </button>
+          </div>
+        </form>
       </Modal>
 
       {/* ── Deactivate Confirm ────────────────────────────────────────────── */}

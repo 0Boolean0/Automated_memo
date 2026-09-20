@@ -18,7 +18,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
 import {
   Camera, CameraOff, Loader2, ChevronDown, RefreshCw,
-  Smartphone, HelpCircle, CheckCircle2, ExternalLink,
+  Smartphone, HelpCircle, CheckCircle2, ExternalLink, Upload,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '@/components/ui/Modal'
@@ -34,12 +34,14 @@ interface Props {
   paused?:         boolean
   deviceId?:       string | null
   onDeviceChange?: (device: CameraDevice) => void
+  onSwitchToPhoto?: () => void
 }
 
 export default function BarcodeScanner({
   onScan, onError, paused = false,
   deviceId: controlledDeviceId,
   onDeviceChange,
+  onSwitchToPhoto,
 }: Props) {
   const videoRef    = useRef<HTMLVideoElement>(null)
   const controlsRef = useRef<IScannerControls | null>(null)
@@ -61,6 +63,15 @@ export default function BarcodeScanner({
   // ── Refresh device list ─────────────────────────────────────────────────
   const refreshDevices = useCallback(async (notify = false) => {
     setRefreshing(true)
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setStatus('error')
+      const msg = 'Live webcam requires HTTPS or localhost. Please use "Upload / Snap Picture" or "Type / Search".'
+      setErrorMsg(msg)
+      onError?.(msg)
+      setRefreshing(false)
+      return
+    }
+
     try {
       // Warm up camera permission if labels are blank
       try {
@@ -120,6 +131,14 @@ export default function BarcodeScanner({
     setStatus('starting')
     controlsRef.current?.stop()
     controlsRef.current = null
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setStatus('error')
+      const msg = 'Live camera requires HTTPS or localhost. Please use "Upload / Snap Picture" or "Type / Search".'
+      setErrorMsg(msg)
+      onError?.(msg)
+      return
+    }
 
     const codeReader = new BrowserMultiFormatReader()
 
@@ -271,13 +290,23 @@ export default function BarcodeScanner({
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/90 text-white gap-3 p-4 text-center">
             <CameraOff size={32} className="text-red-400" />
             <p className="text-sm font-medium">{errorMsg}</p>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-center">
               <button
                 onClick={startScanning}
                 className="px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg text-xs font-medium transition-colors"
               >
                 Retry Camera
               </button>
+              {onSwitchToPhoto && (
+                <button
+                  type="button"
+                  onClick={onSwitchToPhoto}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+                >
+                  <Upload size={13} />
+                  Upload / Snap Picture Instead
+                </button>
+              )}
               <button
                 onClick={() => setShowHelpModal(true)}
                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs font-medium transition-colors"

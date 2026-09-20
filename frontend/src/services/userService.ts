@@ -33,6 +33,8 @@ export const userService = {
   update: (id: number, payload: UpdateUserPayload) =>
     api.put<User>(`/users/${id}`, payload).then((r) => r.data),
   deactivate: (id: number) => api.delete<User>(`/users/${id}`).then((r) => r.data),
+  changePassword: (id: number, newPassword: string) =>
+    api.put<{ message: string }>(`/users/${id}/password`, { new_password: newPassword }).then((r) => r.data),
 }
 
 // ─── Roles ────────────────────────────────────────────────────────────────────

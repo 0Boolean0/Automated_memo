@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.auth.dependencies import get_current_user, require_any_role
 from app.models.user import User, Role
-from app.schemas.auth import UserCreate, UserUpdate, UserResponse
+from app.schemas.auth import UserCreate, UserUpdate, UserResponse, AdminResetPasswordRequest
 from app.services import auth_service
 
 router = APIRouter()
@@ -118,3 +118,20 @@ def deactivate_user(
     if user.business_id != current_user.business_id:
         raise HTTPException(status_code=404, detail="User not found")
     return auth_service.deactivate_user(db, user, requesting_user=current_user)
+
+
+@router.put("/{user_id}/password", status_code=200)
+def reset_user_password(
+    user_id: int,
+    data: AdminResetPasswordRequest,
+    current_user: User = Depends(require_any_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin resets or changes a user's password directly.
+    """
+    user = auth_service.get_user_by_id(db, user_id)
+    if user.business_id != current_user.business_id:
+        raise HTTPException(status_code=404, detail="User not found")
+    auth_service.reset_user_password(db, user, data.new_password)
+    return {"message": "Password updated successfully"}
