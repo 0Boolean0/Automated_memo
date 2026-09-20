@@ -373,7 +373,7 @@ def generate_invoice_pdf(
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 11)
     pdf.set_text_color(30, 58, 138)
-    pdf.cell(W, 7, "Thank you for your business!", align="C", ln=True)
+    pdf.cell(W, 7, "Thanks for trusting us!", align="C", ln=True)
     pdf.set_text_color(0, 0, 0)
 
     # ── Save ─────────────────────────────────────────────────────────────
