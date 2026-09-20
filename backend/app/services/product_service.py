@@ -286,19 +286,38 @@ def create_product(
         db.add(variant)
         db.flush()
 
-        if init_stock > 0 and product.is_serialized:
-            clean_sku = (vdata.sku or "SN").strip().upper()
-            for i in range(init_stock):
-                sn = SerialNumber(
-                    business_id=business_id,
-                    variant_id=variant.id,
-                    serial=f"{clean_sku}-{now.strftime('%y%m%d')}-{i+1:04d}",
-                    status="IN_STOCK",
-                    cost_price=vdata.cost_price,
-                    received_at=now,
-                    notes="Initial stock on product creation",
-                )
-                db.add(sn)
+        user_serials = [s.strip() for s in (getattr(vdata, 'initial_serials', []) or []) if s and s.strip()]
+        if product.is_serialized:
+            if user_serials and len(user_serials) > init_stock:
+                init_stock = len(user_serials)
+                variant.current_stock = init_stock
+
+            if init_stock > 0:
+                clean_sku = (vdata.sku or "SN").strip().upper()
+                for s_val in user_serials:
+                    exists = db.query(SerialNumber).filter(
+                        SerialNumber.business_id == business_id,
+                        SerialNumber.serial == s_val
+                    ).first()
+                    if exists:
+                        raise HTTPException(status_code=409, detail=f"Serial number '{s_val}' already exists")
+
+                for i in range(init_stock):
+                    if i < len(user_serials):
+                        sn_code = user_serials[i]
+                    else:
+                        sn_code = f"{clean_sku}-{now.strftime('%y%m%d')}-{i+1:04d}"
+
+                    sn = SerialNumber(
+                        business_id=business_id,
+                        variant_id=variant.id,
+                        serial=sn_code,
+                        status="IN_STOCK",
+                        cost_price=vdata.cost_price,
+                        received_at=now,
+                        notes="Initial stock on product creation",
+                    )
+                    db.add(sn)
 
     db.commit()
     db.refresh(product)
@@ -352,8 +371,44 @@ def add_variant(
         if existing:
             raise HTTPException(status_code=409, detail=f"SKU '{data.sku}' already exists")
 
-    variant = ProductVariant(product_id=product.id, **data.model_dump())
+    init_stock = max(0, getattr(data, 'initial_stock', 0) or 0)
+    user_serials = [s.strip() for s in (getattr(data, 'initial_serials', []) or []) if s and s.strip()]
+    if product.is_serialized and user_serials and len(user_serials) > init_stock:
+        init_stock = len(user_serials)
+
+    variant_dict = data.model_dump(exclude={"initial_serials", "initial_stock"})
+    variant = ProductVariant(product_id=product.id, current_stock=init_stock, **variant_dict)
     db.add(variant)
+    db.flush()
+
+    if product.is_serialized and init_stock > 0:
+        now = datetime.now(timezone.utc)
+        clean_sku = (data.sku or "SN").strip().upper()
+        for s_val in user_serials:
+            exists = db.query(SerialNumber).filter(
+                SerialNumber.business_id == business_id,
+                SerialNumber.serial == s_val
+            ).first()
+            if exists:
+                raise HTTPException(status_code=409, detail=f"Serial number '{s_val}' already exists")
+
+        for i in range(init_stock):
+            if i < len(user_serials):
+                sn_code = user_serials[i]
+            else:
+                sn_code = f"{clean_sku}-{now.strftime('%y%m%d')}-{i+1:04d}"
+
+            sn = SerialNumber(
+                business_id=business_id,
+                variant_id=variant.id,
+                serial=sn_code,
+                status="IN_STOCK",
+                cost_price=data.cost_price,
+                received_at=now,
+                notes="Initial stock on variant creation",
+            )
+            db.add(sn)
+
     db.commit()
     db.refresh(variant)
     return variant
@@ -855,3 +910,84 @@ def scan_image_for_code(db: Session, business_id: int, image_bytes: bytes) -> di
         "match": None,
         "message": "No matching in-stock product or serial was found in the image." if raw_text else "Could not detect clear text or barcode from image.",
     }
+
+
+def extract_label_codes_from_image(image_bytes: bytes) -> dict:
+    """
+    Process an uploaded label/box image using Windows OCR and regex heuristics.
+    Extracts barcode, SKU, serial numbers, lines, and candidate tokens.
+    """
+    import io
+    import re
+    from PIL import Image
+
+    try:
+        pil_img = Image.open(io.BytesIO(image_bytes))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid image file: {str(e)}")
+
+    raw_text = ""
+    try:
+        import winocr, asyncio
+        ocr_res = asyncio.run(winocr.recognize_pil(pil_img, "en"))
+        if hasattr(ocr_res, "text"):
+            raw_text = ocr_res.text
+        elif isinstance(ocr_res, dict):
+            raw_text = ocr_res.get("text", "")
+    except Exception:
+        raw_text = ""
+
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+
+    # 1. Serial number extraction
+    serials: list[str] = []
+    sn_matches = re.findall(r'(?:s/?n|serial(?:\s*no\.?)?|ser\.?)\s*[:#\-]?\s*([a-zA-Z0-9_\-\.\/]+)', raw_text, re.IGNORECASE)
+    for sm in sn_matches:
+        cleaned = sm.strip()
+        if cleaned and cleaned not in serials:
+            serials.append(cleaned)
+
+    for token in re.findall(r'\bSN[A-Za-z0-9_\-]{4,}\b', raw_text):
+        if token not in serials:
+            serials.append(token)
+
+    # 2. Barcode extraction
+    barcode = None
+    bc_match = re.search(r'(?:barcode|ean|upc|isbn|code)\s*[:#\-]?\s*([a-zA-Z0-9_\-]+)', raw_text, re.IGNORECASE)
+    if bc_match:
+        barcode = bc_match.group(1).strip()
+    else:
+        num_matches = re.findall(r'\b(?:\d{12,14}|\d{8})\b', raw_text)
+        if num_matches:
+            barcode = num_matches[0]
+
+    # 3. SKU / Model extraction
+    sku = None
+    sku_match = re.search(r'(?:sku|model(?:\s*no\.?)?|p/?n|part(?:\s*no\.?)?|item(?:\s*no\.?)?)\s*[:#\-]?\s*([a-zA-Z0-9_\-\.\/]+)', raw_text, re.IGNORECASE)
+    if sku_match:
+        sku = sku_match.group(1).strip()
+
+    # 4. Collect candidate tokens
+    candidates: list[str] = []
+    for token in re.findall(r'[A-Za-z0-9][A-Za-z0-9_\-\.]{2,}', raw_text):
+        t = token.strip()
+        if t and t not in candidates:
+            candidates.append(t)
+
+    message = None
+    if not barcode and not sku and not serials:
+        if raw_text:
+            message = "Text was detected on the label, but specific Barcode/SKU/Serial labels were not identified. You can select from the detected snippets below."
+        else:
+            message = "No clear text or barcode detected in image. Please ensure good lighting and focus."
+
+    return {
+        "raw_text": raw_text,
+        "barcode": barcode,
+        "sku": sku,
+        "serials": serials,
+        "all_candidates": candidates[:20],
+        "lines": lines[:15],
+        "message": message,
+    }
+

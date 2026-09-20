@@ -23,7 +23,7 @@ from app.schemas.product import (
     ProductListResponse, PaginatedProducts,
     VariantCreate, VariantUpdate, VariantResponse,
     PriceHistoryResponse, InStockProductItem,
-    QuickLookupResult, ScanImageResponse,
+    QuickLookupResult, ScanImageResponse, ExtractedLabelData,
 )
 from app.services import product_service
 
@@ -114,6 +114,20 @@ async def scan_image(
     """
     image_bytes = await file.read()
     return product_service.scan_image_for_code(db, current_user.business_id, image_bytes)
+
+
+@router.post("/extract-label-codes", response_model=ExtractedLabelData, tags=["products"])
+async def extract_label_codes(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_permission("view_products")),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload an image of a product label, box, or sticker.
+    Extracts barcode, SKU, and serial numbers to auto-fill product forms.
+    """
+    image_bytes = await file.read()
+    return product_service.extract_label_codes_from_image(image_bytes)
 
 
 @router.get("/{product_id}", response_model=ProductResponse)

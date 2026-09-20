@@ -146,6 +146,16 @@ export interface ScanImageResponse {
   message: string | null
 }
 
+export interface ExtractedLabelData {
+  raw_text: string
+  barcode?: string | null
+  sku?: string | null
+  serials: string[]
+  all_candidates: string[]
+  lines: string[]
+  message?: string | null
+}
+
 export interface ProductListParams {
   search?: string
   category_id?: number
@@ -163,6 +173,8 @@ export interface CreateVariantPayload {
   selling_price: number
   warranty_months: number
   reorder_level: number
+  initial_stock?: number
+  initial_serials?: string[]
   other_specs?: Record<string, string>
 }
 
@@ -265,6 +277,15 @@ export const productService = {
     const formData = new FormData()
     formData.append('file', file)
     return api.post<ScanImageResponse>('/products/scan-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  /** Upload an image of a box/label to extract Barcode, SKU, and Serial numbers. */
+  extractLabelCodes: (file: File | Blob) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<ExtractedLabelData>('/products/extract-label-codes', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },

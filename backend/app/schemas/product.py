@@ -64,6 +64,7 @@ class VariantCreate(BaseModel):
     warranty_months: int = 0
     reorder_level: int = 5
     initial_stock: Optional[int] = 0
+    initial_serials: Optional[list[str]] = None
     other_specs: Optional[dict[str, Any]] = None
 
     @field_validator("cost_price", "selling_price")
@@ -227,4 +228,14 @@ class ScanImageResponse(BaseModel):
     raw_text: str = ""
     detected_code: Optional[str] = None
     match: Optional[QuickLookupResult] = None
+    message: Optional[str] = None
+
+
+class ExtractedLabelData(BaseModel):
+    raw_text: str = ""
+    barcode: Optional[str] = None
+    sku: Optional[str] = None
+    serials: list[str] = []
+    all_candidates: list[str] = []
+    lines: list[str] = []
     message: Optional[str] = None
