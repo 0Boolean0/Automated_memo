@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta, date
 from decimal import Decimal
 from collections import defaultdict
 from sqlalchemy.orm import Session
-from sqlalchemy import func, cast, Date as SQLDate
+from sqlalchemy import func
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
@@ -53,14 +53,14 @@ def get_summary(
     # Today sales
     today_q = db.query(Sale).filter(
         Sale.business_id == biz,
-        cast(Sale.sale_date, SQLDate) == today,
+        Sale.sale_date == today,
     )
     today_sales = today_q.count()
     today_revenue = db.query(
         func.coalesce(func.sum(Sale.total_amount - Sale.discount_amount), 0)
     ).filter(
         Sale.business_id == biz,
-        cast(Sale.sale_date, SQLDate) == today,
+        Sale.sale_date == today,
     ).scalar() or 0
 
     # All-time
@@ -149,7 +149,7 @@ def get_sales_chart(
     # Query aggregated daily sales
     rows = (
         db.query(
-            cast(Sale.sale_date, SQLDate).label("day"),
+            Sale.sale_date.label("day"),
             func.count(Sale.id).label("sales_count"),
             func.coalesce(
                 func.sum(Sale.total_amount - Sale.discount_amount), 0
@@ -160,7 +160,7 @@ def get_sales_chart(
             Sale.sale_date >= start,
             Sale.sale_date <= today,
         )
-        .group_by(cast(Sale.sale_date, SQLDate))
+        .group_by(Sale.sale_date)
         .all()
     )
 
@@ -226,8 +226,8 @@ def get_top_products(
             "variant_name": variant.name if variant else "—",
             "product_name": product.name if product else "—",
             "sku":          variant.sku if variant else None,
-            "qty_sold":     int(row.qty_sold),
-            "revenue":      float(row.revenue),
+            "qty_sold":     int(row.qty_sold or 0),
+            "revenue":      float(row.revenue or 0),
         })
 
     return {"limit": limit, "days": days, "data": result}
@@ -260,10 +260,10 @@ def get_inventory_report(
 
     for v in variants:
         product = v.product
-        cat = product.category.name if product.category else "Uncategorized"
-        stock = v.current_stock
-        cost  = float(v.cost_price) * stock
-        retail= float(v.selling_price) * stock
+        cat = product.category.name if (product and product.category) else "Uncategorized"
+        stock = v.current_stock or 0
+        cost  = float(v.cost_price or 0) * stock
+        retail= float(v.selling_price or 0) * stock
         total_cost   += cost
         total_retail += retail
         by_cat[cat]["stock"]        += stock

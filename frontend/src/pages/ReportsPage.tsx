@@ -43,20 +43,24 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 // ─── Sales Tab ────────────────────────────────────────────────────────────────
 
 function SalesTab() {
-  const [days, setDays]       = useState(30)
-  const [chart, setChart]     = useState<SalesChartPoint[]>([])
+  const [days, setDays] = useState(30)
+  const [chart, setChart] = useState<SalesChartPoint[]>([])
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [chartRes, sumRes] = await Promise.all([
+      const [chartRes, sumRes] = await Promise.allSettled([
         reportsService.getSalesChart(days),
         reportsService.getSummary(),
       ])
-      setChart(chartRes.data)
-      setSummary(sumRes)
+      if (chartRes.status === 'fulfilled') {
+        setChart(chartRes.value.data)
+      }
+      if (sumRes.status === 'fulfilled') {
+        setSummary(sumRes.value)
+      }
     } catch { /* interceptor */ }
     finally { setLoading(false) }
   }, [days])
@@ -64,8 +68,8 @@ function SalesTab() {
   useEffect(() => { fetchData() }, [fetchData])
 
   const totalRevenue = chart.reduce((s, d) => s + d.revenue, 0)
-  const totalCount   = chart.reduce((s, d) => s + d.sales_count, 0)
-  const avgDaily     = chart.length ? totalRevenue / chart.length : 0
+  const totalCount = chart.reduce((s, d) => s + d.sales_count, 0)
+  const avgDaily = chart.length ? totalRevenue / chart.length : 0
 
   // Shorten date labels: "Sep 18"
   const formatXDate = (d: string) => {
@@ -82,9 +86,8 @@ function SalesTab() {
           <button
             key={d}
             onClick={() => setDays(d)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              days === d ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${days === d ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
           >
             {d}d
           </button>
@@ -95,10 +98,10 @@ function SalesTab() {
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label={`Revenue (${days}d)`}   value={formatCurrency(totalRevenue)} />
-            <StatCard label={`Sales (${days}d)`}     value={String(totalCount)} />
-            <StatCard label="Daily Avg"              value={formatCurrency(avgDaily)} />
-            <StatCard label="All-time Revenue"       value={formatCurrency(summary?.total_revenue ?? 0)} />
+            <StatCard label={`Revenue (${days}d)`} value={formatCurrency(totalRevenue)} />
+            <StatCard label={`Sales (${days}d)`} value={String(totalCount)} />
+            <StatCard label="Daily Avg" value={formatCurrency(avgDaily)} />
+            <StatCard label="All-time Revenue" value={formatCurrency(summary?.total_revenue ?? 0)} />
           </div>
 
           {/* Revenue line chart */}
@@ -111,11 +114,11 @@ function SalesTab() {
                   dataKey="date"
                   tickFormatter={formatXDate}
                   tick={{ fontSize: 11 }}
-                  interval={Math.floor(chart.length / 7)}
+                  interval={chart.length > 7 ? Math.floor(chart.length / 7) : 0}
                 />
                 <YAxis tickFormatter={v => `৳${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} width={50} />
                 <Tooltip
-                  formatter={(v: number) => [formatCurrency(v), 'Revenue']}
+                  formatter={(v: any) => [formatCurrency(Number(v) || 0), 'Revenue']}
                   labelFormatter={formatXDate}
                 />
                 <Line
@@ -140,7 +143,7 @@ function SalesTab() {
                   dataKey="date"
                   tickFormatter={formatXDate}
                   tick={{ fontSize: 11 }}
-                  interval={Math.floor(chart.length / 7)}
+                  interval={chart.length > 7 ? Math.floor(chart.length / 7) : 0}
                 />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={30} />
                 <Tooltip labelFormatter={formatXDate} />
@@ -157,9 +160,9 @@ function SalesTab() {
 // ─── Products Tab ─────────────────────────────────────────────────────────────
 
 function ProductsTab() {
-  const [days, setDays]         = useState<number | undefined>(undefined)
+  const [days, setDays] = useState<number | undefined>(undefined)
   const [products, setProducts] = useState<TopProduct[]>([])
-  const [loading, setLoading]   = useState(true)
+  const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -181,9 +184,8 @@ function ProductsTab() {
           <button
             key={String(d)}
             onClick={() => setDays(d)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              days === d ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${days === d ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
           >
             {d ? `${d}d` : 'All'}
           </button>
@@ -264,12 +266,12 @@ function InventoryTab() {
   useEffect(() => {
     reportsService.getInventory()
       .then(setReport)
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false))
   }, [])
 
   if (loading) return <SectionLoader />
-  if (!report)  return <div className="card text-center py-12 text-gray-400">No inventory data.</div>
+  if (!report) return <div className="card text-center py-12 text-gray-400">No inventory data.</div>
 
   return (
     <div className="space-y-5">
@@ -312,7 +314,7 @@ function InventoryTab() {
                   name === 'stock' ? 'Units' : 'Retail Value',
                 ]}
               />
-              <Bar dataKey="stock"        fill="#2563eb" radius={[0, 3, 3, 0]} name="stock" />
+              <Bar dataKey="stock" fill="#2563eb" radius={[0, 3, 3, 0]} name="stock" />
               <Bar dataKey="retail_value" fill="#10b981" radius={[0, 3, 3, 0]} name="retail_value" />
               <Legend />
             </BarChart>
@@ -351,8 +353,8 @@ export default function ReportsPage() {
   const [tab, setTab] = useState<'sales' | 'products' | 'inventory'>('sales')
 
   const tabs = [
-    { key: 'sales',     label: 'Sales',     icon: TrendingUp },
-    { key: 'products',  label: 'Products',  icon: Package },
+    { key: 'sales', label: 'Sales', icon: TrendingUp },
+    { key: 'products', label: 'Products', icon: Package },
     { key: 'inventory', label: 'Inventory', icon: Boxes },
   ] as const
 
@@ -370,11 +372,10 @@ export default function ReportsPage() {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              tab === t.key
+            className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${tab === t.key
                 ? 'border-primary-600 text-primary-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
+              }`}
           >
             <t.icon size={15} />
             {t.label}
@@ -382,8 +383,8 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {tab === 'sales'     && <SalesTab />}
-      {tab === 'products'  && <ProductsTab />}
+      {tab === 'sales' && <SalesTab />}
+      {tab === 'products' && <ProductsTab />}
       {tab === 'inventory' && <InventoryTab />}
     </div>
   )
