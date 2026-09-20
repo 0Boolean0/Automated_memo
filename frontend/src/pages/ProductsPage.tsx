@@ -166,8 +166,8 @@ export default function ProductsPage() {
                       </td>
                       <td className="px-5 py-3.5 text-gray-700">{p.variant_count ?? 0}</td>
                       <td className="px-5 py-3.5">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${(p.total_stock ?? 0) === 0 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                          {p.total_stock ?? 0} in stock
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${(p.total_stock ?? 0) <= 0 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                          {(p.total_stock ?? 0) <= 0 ? 'Stock Out' : `${p.total_stock} in stock`}
                         </span>
                       </td>
                       <td className="px-5 py-3.5">

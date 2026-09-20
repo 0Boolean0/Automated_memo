@@ -73,10 +73,14 @@ class SaleItem(Base):
     variant_id      = Column(Integer, ForeignKey("product_variants.id", ondelete="RESTRICT"), nullable=False, index=True)
     quantity        = Column(Integer, nullable=False, default=1)
 
-    # Price FROZEN at sale time — never updated after creation
+    # Price & Warranty FROZEN at sale time — never updated after creation
     unit_price      = Column(Numeric(12, 2), nullable=False, default=0)
     discount_amount = Column(Numeric(12, 2), nullable=False, default=0)  # per-line discount
     total_price     = Column(Numeric(12, 2), nullable=False, default=0)  # (unit_price - discount) * qty
+
+    # Warranty agreed at sale time (e.g. "1 Year", "2 Years", "7 Days", "No Warranty")
+    warranty_period = Column(String(100), nullable=True)
+    warranty_months = Column(Integer, nullable=True, default=0)
 
     notes           = Column(Text, nullable=True)
 

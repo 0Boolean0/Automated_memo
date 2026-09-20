@@ -16,7 +16,7 @@ import { z } from 'zod'
 import {
   ChevronRight, ChevronLeft, Check, Plus, Trash2,
   Loader2, Users, Package, Tag, ClipboardList, Star,
-  ScanLine, Printer, Download, Sparkles,
+  ScanLine, Printer, Download, Sparkles, Shield,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/services/api'
@@ -27,15 +27,41 @@ import { productService, type Product, type ProductVariant } from '@/services/pr
 import { saleService, type SaleItemCreate, type Sale } from '@/services/saleService'
 import { formatCurrency } from '@/utils/format'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types & Presets ──────────────────────────────────────────────────────────
+
+export const WARRANTY_PRESETS = [
+  { label: 'No Warranty',         period: 'No Warranty',         months: 0 },
+  { label: '7 Days Replacement',  period: '7 Days Replacement',  months: 0 },
+  { label: '10 Days Replacement', period: '10 Days Replacement', months: 0 },
+  { label: '1 Month',             period: '1 Month',             months: 1 },
+  { label: '3 Months',            period: '3 Months',            months: 3 },
+  { label: '6 Months',            period: '6 Months',            months: 6 },
+  { label: '1 Year',              period: '1 Year',              months: 12 },
+  { label: '2 Years',             period: '2 Years',             months: 24 },
+  { label: '3 Years',             period: '3 Years',             months: 36 },
+  { label: '5 Years',             period: '5 Years',             months: 60 },
+  { label: 'Lifetime',            period: 'Lifetime',            months: 999 },
+]
+
+export function formatDefaultWarranty(months?: number): { period: string; months: number } {
+  const m = months ?? 0
+  if (m <= 0) return { period: 'No Warranty', months: 0 }
+  if (m % 12 === 0) {
+    const y = m / 12
+    return { period: y === 1 ? '1 Year' : `${y} Years`, months: m }
+  }
+  return { period: `${m} Months`, months: m }
+}
 
 interface CartItem {
-  variant:   ProductVariant
-  product:   Product
-  quantity:  number
-  unit_price: number   // frozen from variant.selling_price, editable
-  discount:  number
-  serials:   string[]
+  variant:         ProductVariant
+  product:         Product
+  quantity:        number
+  unit_price:      number   // frozen from variant.selling_price, editable
+  discount:        number
+  warranty_period: string   // e.g. "1 Year", "2 Years", "7 Days", "No Warranty"
+  warranty_months: number   // e.g. 12, 24, 0
+  serials:         string[]
 }
 
 // ─── Step bar ─────────────────────────────────────────────────────────────────
@@ -168,6 +194,8 @@ function StepCart({
   const [products, setProducts] = useState<Product[]>([])
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
+  const [warrantyOption, setWarrantyOption] = useState<string>('DEFAULT')
+  const [customWarranty, setCustomWarranty] = useState<string>('')
   const [qty, setQty] = useState(1)
   const [showScanModal, setShowScanModal] = useState(false)
 
@@ -198,19 +226,22 @@ function StepCart({
         return
       }
 
-      const existing = cart.findIndex(i => i.variant.id === v.id)
+      const defW = formatDefaultWarranty(v.warranty_months)
+      const existing = cart.findIndex(i => i.variant.id === v.id && i.warranty_period === defW.period)
       if (existing >= 0) {
         const updated = [...cart]
         updated[existing].quantity += 1
         onUpdateCart(updated)
       } else {
         onUpdateCart([...cart, {
-          variant: v,
-          product: p,
-          quantity: 1,
-          unit_price: Number(v.selling_price),
-          discount: 0,
-          serials: [],
+          variant:         v,
+          product:         p,
+          quantity:        1,
+          unit_price:      Number(v.selling_price),
+          discount:        0,
+          warranty_period: defW.period,
+          warranty_months: defW.months,
+          serials:         [],
         }])
       }
       toast.success(`Scanned & added: ${p.name} (${v.name})`)
@@ -221,24 +252,42 @@ function StepCart({
 
   const addToCart = () => {
     if (!selectedVariant || !selectedProduct) return
-    // Check if variant already in cart
-    const existing = cart.findIndex(i => i.variant.id === selectedVariant.id)
+
+    const defaultW = formatDefaultWarranty(selectedVariant.warranty_months)
+    let wPeriod = defaultW.period
+    let wMonths = defaultW.months
+
+    if (warrantyOption === 'CUSTOM') {
+      wPeriod = customWarranty.trim() || 'No Warranty'
+      wMonths = 0
+    } else if (warrantyOption !== 'DEFAULT') {
+      const preset = WARRANTY_PRESETS.find(p => p.period === warrantyOption)
+      wPeriod = preset ? preset.period : warrantyOption
+      wMonths = preset ? preset.months : 0
+    }
+
+    // Check if variant with same warranty already in cart
+    const existing = cart.findIndex(i => i.variant.id === selectedVariant.id && i.warranty_period === wPeriod)
     if (existing >= 0) {
       const updated = [...cart]
       updated[existing].quantity += qty
       onUpdateCart(updated)
     } else {
       onUpdateCart([...cart, {
-        variant:    selectedVariant,
-        product:    selectedProduct,
-        quantity:   qty,
-        unit_price: Number(selectedVariant.selling_price),
-        discount:   0,
-        serials:    [],
+        variant:         selectedVariant,
+        product:         selectedProduct,
+        quantity:        qty,
+        unit_price:      Number(selectedVariant.selling_price),
+        discount:        0,
+        warranty_period: wPeriod,
+        warranty_months: wMonths,
+        serials:         [],
       }])
     }
     setSelectedProduct(null)
     setSelectedVariant(null)
+    setWarrantyOption('DEFAULT')
+    setCustomWarranty('')
     setQty(1)
   }
 
@@ -260,6 +309,13 @@ function StepCart({
     onUpdateCart(updated)
   }
 
+  const updateWarranty = (idx: number, period: string, months: number) => {
+    const updated = [...cart]
+    updated[idx].warranty_period = period
+    updated[idx].warranty_months = months
+    onUpdateCart(updated)
+  }
+
   const total = cart.reduce((s, i) => s + i.quantity * i.unit_price, 0)
 
   return (
@@ -276,7 +332,7 @@ function StepCart({
             <ScanLine size={14} /> Scan Barcode (Camera / iVCam)
           </button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className="label">Product</label>
             <select
@@ -286,6 +342,8 @@ function StepCart({
                 const p = products.find(x => x.id === Number(e.target.value)) ?? null
                 setSelectedProduct(p)
                 setSelectedVariant(null)
+                setWarrantyOption('DEFAULT')
+                setCustomWarranty('')
               }}
             >
               <option value="">— Select Product —</option>
@@ -306,15 +364,46 @@ function StepCart({
               onChange={e => {
                 const v = selectedProduct?.variants?.find(x => x.id === Number(e.target.value)) ?? null
                 setSelectedVariant(v)
+                setWarrantyOption('DEFAULT')
+                setCustomWarranty('')
               }}
             >
               <option value="">— Select Variant —</option>
               {selectedProduct?.variants?.filter(v => v.is_active).map(v => (
-                <option key={v.id} value={v.id} disabled={v.current_stock === 0}>
-                  {v.name} — {v.current_stock} in stock — {formatCurrency(v.selling_price)}
+                <option key={v.id} value={v.id} disabled={v.current_stock <= 0}>
+                  {v.name} — {v.current_stock <= 0 ? 'Stock Out' : `${v.current_stock} in stock`} — {formatCurrency(v.selling_price)}
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="label flex items-center gap-1">
+              <Shield size={12} className="text-primary-600" /> Warranty
+            </label>
+            <select
+              className="input"
+              disabled={!selectedVariant}
+              value={warrantyOption}
+              onChange={e => setWarrantyOption(e.target.value)}
+            >
+              <option value="DEFAULT">
+                Default ({selectedVariant ? formatDefaultWarranty(selectedVariant.warranty_months).period : 'from product'})
+              </option>
+              {WARRANTY_PRESETS.map(p => (
+                <option key={p.period} value={p.period}>{p.label}</option>
+              ))}
+              <option value="CUSTOM">Custom Warranty…</option>
+            </select>
+            {warrantyOption === 'CUSTOM' && (
+              <input
+                type="text"
+                className="input mt-1.5 text-xs py-1"
+                placeholder="e.g. 18 Months Official"
+                value={customWarranty}
+                onChange={e => setCustomWarranty(e.target.value)}
+              />
+            )}
           </div>
 
           <div>
@@ -350,6 +439,7 @@ function StepCart({
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Product</th>
+                <th className="text-left px-3 py-3 font-medium text-gray-600 w-44">Warranty</th>
                 <th className="text-center px-3 py-3 font-medium text-gray-600 w-20">Qty</th>
                 <th className="text-right px-3 py-3 font-medium text-gray-600 w-32">Price (৳)</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-600 w-28">Total</th>
@@ -365,6 +455,24 @@ function StepCart({
                     {item.product.is_serialized && (
                       <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Serialized</span>
                     )}
+                  </td>
+                  <td className="px-3 py-3">
+                    <select
+                      className="input py-1 px-2 text-xs w-full bg-white font-medium text-gray-700"
+                      value={item.warranty_period}
+                      onChange={e => {
+                        const val = e.target.value
+                        const preset = WARRANTY_PRESETS.find(p => p.period === val)
+                        updateWarranty(idx, val, preset ? preset.months : 0)
+                      }}
+                    >
+                      {!WARRANTY_PRESETS.some(p => p.period === item.warranty_period) && (
+                        <option value={item.warranty_period}>{item.warranty_period}</option>
+                      )}
+                      {WARRANTY_PRESETS.map(p => (
+                        <option key={p.period} value={p.period}>{p.label}</option>
+                      ))}
+                    </select>
                   </td>
                   <td className="px-3 py-3">
                     <input
@@ -400,7 +508,7 @@ function StepCart({
             </tbody>
             <tfoot>
               <tr className="border-t border-gray-200 bg-gray-50">
-                <td colSpan={3} className="px-4 py-3 text-sm font-semibold text-gray-700 text-right">
+                <td colSpan={4} className="px-4 py-3 text-sm font-semibold text-gray-700 text-right">
                   Subtotal
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-gray-900">
@@ -559,7 +667,14 @@ function StepSerials({
                   </div>
                   <div>
                     <p className="font-semibold text-gray-900">{item.product.name}</p>
-                    <p className="text-xs text-gray-500">{item.variant.name} — {item.quantity} unit{item.quantity > 1 ? 's' : ''}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-xs text-gray-500">{item.variant.name} — {item.quantity} unit{item.quantity > 1 ? 's' : ''}</p>
+                      {item.warranty_period && (
+                        <span className="text-[11px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 flex items-center gap-1">
+                          <Shield size={10} className="text-blue-500" /> {item.warranty_period}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -746,7 +861,14 @@ function StepConfirm({
             <div key={i} className="px-4 py-3 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-gray-900 text-sm">{item.product.name}</p>
-                <p className="text-xs text-gray-500">{item.variant.name}{item.variant.sku ? ` · ${item.variant.sku}` : ''}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-xs text-gray-500">{item.variant.name}{item.variant.sku ? ` · ${item.variant.sku}` : ''}</p>
+                  {item.warranty_period && (
+                    <span className="text-[11px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 flex items-center gap-1">
+                      <Shield size={10} className="text-blue-500" /> Warranty: {item.warranty_period}
+                    </span>
+                  )}
+                </div>
                 {item.product.is_serialized && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {item.serials.map((s, si) => (
@@ -902,11 +1024,13 @@ export default function POSPage() {
     setSubmitting(true)
     try {
       const items: SaleItemCreate[] = cart.map(item => ({
-        variant_id: item.variant.id,
-        quantity:   item.quantity,
-        unit_price: item.unit_price,
+        variant_id:      item.variant.id,
+        quantity:        item.quantity,
+        unit_price:      item.unit_price,
         discount_amount: item.discount,
-        serials:    item.serials.filter(Boolean).map(s => ({ serial: s })),
+        warranty_period: item.warranty_period,
+        warranty_months: item.warranty_months,
+        serials:         item.serials.filter(Boolean).map(s => ({ serial: s })),
       }))
 
       const sale = await saleService.create({

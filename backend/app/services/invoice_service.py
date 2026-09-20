@@ -216,7 +216,7 @@ def generate_invoice_pdf(
     pdf.set_fill_color(30, 58, 138)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Helvetica", "B", 9)
-    col_w = [W - 72, 14, 24, 20, 14]   # Item, Qty, Unit Price, Discount, Total
+    col_w = [98, 14, 24, 22, 24]   # Item (98), Qty (14), Unit Price (24), Discount (22), Total (24) = 182mm
     headers = ["Item", "Qty", f"Unit ({currency})", f"Disc ({currency})", f"Total ({currency})"]
     aligns = ["L", "C", "R", "R", "R"]
     for i, h in enumerate(headers):
@@ -234,12 +234,29 @@ def generate_invoice_pdf(
         sku = _clean(variant.sku) if (variant and variant.sku) else None
         serials = [_clean(s) for s in item_serials.get(item.id, [])]
 
+        # Determine warranty text: check item first, fallback to variant if not explicitly set
+        warranty_str = _clean(item.warranty_period) if item.warranty_period else None
+        if not warranty_str:
+            if item.warranty_months and item.warranty_months > 0:
+                w_months = item.warranty_months
+            else:
+                w_months = (variant.warranty_months or 0) if variant else 0
+
+            if w_months and w_months > 0:
+                if w_months % 12 == 0:
+                    y = w_months // 12
+                    warranty_str = f"{y} Year" if y == 1 else f"{y} Years"
+                else:
+                    warranty_str = f"{w_months} Mo"
+            else:
+                warranty_str = "No Warranty"
+
         pdf.set_fill_color(249, 250, 251) if row_fill else pdf.set_fill_color(255, 255, 255)
         row_fill = not row_fill
 
         row_y = pdf.get_y()
         pdf.set_font("Helvetica", "B", 9)
-        pdf.cell(col_w[0], 5, product_name[:40], fill=True)
+        pdf.cell(col_w[0], 5, product_name[:42], fill=True)
         pdf.set_font("Helvetica", "", 9)
         pdf.cell(col_w[1], 5, str(item.quantity), fill=True, align="C")
         pdf.cell(col_w[2], 5, _fmt(item.unit_price), fill=True, align="R")
@@ -247,18 +264,26 @@ def generate_invoice_pdf(
         pdf.set_font("Helvetica", "B", 9)
         pdf.cell(col_w[4], 5, _fmt(item.total_price), fill=True, align="R", ln=True)
 
-        # Variant + SKU sub-line
+        # Variant + SKU + Warranty sub-line
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(100, 100, 100)
-        sub = variant_name + (f"  SKU: {sku}" if sku else "")
+        sub_parts = []
+        if variant_name and variant_name != "-":
+            sub_parts.append(variant_name)
+        if sku:
+            sub_parts.append(f"SKU: {sku}")
+        if warranty_str:
+            sub_parts.append(f"Warranty: {warranty_str}")
+        sub = "   |   ".join(sub_parts)
+
         pdf.set_fill_color(249, 250, 251) if not row_fill else pdf.set_fill_color(255, 255, 255)
-        pdf.cell(col_w[0], 4, sub[:50], fill=True)
+        pdf.cell(col_w[0], 4, sub[:65], fill=True)
         pdf.cell(sum(col_w[1:]), 4, "", fill=True, ln=True)
 
         # Serial numbers
         if serials:
             pdf.set_font("Helvetica", "", 7.5)
-            serial_line = "  ".join(serials)
+            serial_line = "Serials:  " + "   ".join(serials)
             # Wrap if too long
             max_chars = 95
             while serial_line:
@@ -333,8 +358,19 @@ def generate_invoice_pdf(
         pdf.set_text_color(0, 0, 0)
         pdf.ln(2)
 
+    # ── Warranty Policy Notice ───────────────────────────────────────────
+    pdf.ln(1)
+    pdf.set_fill_color(248, 250, 252)
+    pdf.set_draw_color(226, 232, 240)
+    pdf.set_font("Helvetica", "I", 7.5)
+    pdf.set_text_color(100, 116, 139)
+    policy_msg = "Warranty Notice: Please retain this invoice / memo for warranty claims. Warranty covers manufacturer defects as per official policy. Physical damage, burn marks, liquid spill, or tampered warranty stickers void all warranty coverage."
+    pdf.multi_cell(W, 3.8, policy_msg, border=1, fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
     # ── Thank you ────────────────────────────────────────────────────────
-    pdf.ln(4)
+    pdf.ln(2)
     pdf.set_font("Helvetica", "B", 11)
     pdf.set_text_color(30, 58, 138)
     pdf.cell(W, 7, "Thank you for your business!", align="C", ln=True)

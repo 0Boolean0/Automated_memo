@@ -42,6 +42,15 @@ def _next_sale_number(db: Session, business_id: int) -> str:
     return f"SO-{year}-{count + 1:05d}"
 
 
+def format_warranty_months(months: int | None) -> str:
+    if not months or months <= 0:
+        return "No Warranty"
+    if months % 12 == 0:
+        years = months // 12
+        return f"{years} Year" if years == 1 else f"{years} Years"
+    return f"{months} Months"
+
+
 # ─── Response builder ─────────────────────────────────────────────────────────
 
 def _build_response(db: Session, sale: Sale) -> SaleResponse:
@@ -52,6 +61,18 @@ def _build_response(db: Session, sale: Sale) -> SaleResponse:
         ).scalar() or 0
         variant = item.variant
         product = variant.product if variant else None
+
+        # Determine warranty: use stored if available, else fallback to variant for past sales
+        stored_period = item.warranty_period
+        stored_months = item.warranty_months
+        if not stored_period:
+            if stored_months and stored_months > 0:
+                stored_period = format_warranty_months(stored_months)
+            else:
+                v_months = variant.warranty_months if variant else 0
+                stored_months = v_months
+                stored_period = format_warranty_months(v_months)
+
         items_out.append(SaleItemResponse(
             id=item.id,
             variant_id=item.variant_id,
@@ -62,6 +83,8 @@ def _build_response(db: Session, sale: Sale) -> SaleResponse:
             unit_price=item.unit_price,
             discount_amount=item.discount_amount,
             total_price=item.total_price,
+            warranty_period=stored_period,
+            warranty_months=stored_months,
             notes=item.notes,
             serial_count=serial_count,
         ))
@@ -170,17 +193,30 @@ def sell(
                     SerialNumber.business_id == business_id,
                 ).first()
                 if not sn:
-                    # Serial number does not exist yet; auto-register it since stock is available
-                    sn = SerialNumber(
-                        business_id=business_id,
-                        variant_id=variant.id,
-                        serial=serial_str,
-                        status="IN_STOCK",
-                        cost_price=variant.cost_price,
-                        created_at=now,
-                    )
-                    db.add(sn)
-                    db.flush()
+                    # Serial number does not exist yet; check if there is an unassigned IN_STOCK serial
+                    # for this variant that can be reassigned to this custom/scanned serial number
+                    used_ids = [s.id for s in serial_objs]
+                    available_placeholder = db.query(SerialNumber).filter(
+                        SerialNumber.variant_id == variant.id,
+                        SerialNumber.business_id == business_id,
+                        SerialNumber.status == "IN_STOCK",
+                        ~SerialNumber.id.in_(used_ids) if used_ids else True,
+                    ).order_by(SerialNumber.id.asc()).first()
+
+                    if available_placeholder:
+                        available_placeholder.serial = serial_str
+                        sn = available_placeholder
+                    else:
+                        sn = SerialNumber(
+                            business_id=business_id,
+                            variant_id=variant.id,
+                            serial=serial_str,
+                            status="IN_STOCK",
+                            cost_price=variant.cost_price,
+                            created_at=now,
+                        )
+                        db.add(sn)
+                        db.flush()
                 elif sn.variant_id != variant.id:
                     raise HTTPException(
                         status_code=422,
@@ -258,6 +294,16 @@ def sell(
         line_discount = item_data.discount_amount
         line_total = (unit_price - line_discount) * item_data.quantity
 
+        # Freeze warranty at sale time
+        w_period = item_data.warranty_period.strip() if item_data.warranty_period and item_data.warranty_period.strip() else None
+        if item_data.warranty_months is not None:
+            w_months = item_data.warranty_months
+        else:
+            w_months = variant.warranty_months or 0
+
+        if not w_period:
+            w_period = format_warranty_months(w_months)
+
         sale_item = SaleItem(
             sale_id=sale.id,
             variant_id=variant.id,
@@ -265,6 +311,8 @@ def sell(
             unit_price=unit_price,
             discount_amount=line_discount,
             total_price=line_total,
+            warranty_period=w_period,
+            warranty_months=w_months,
             notes=item_data.notes,
         )
         db.add(sale_item)

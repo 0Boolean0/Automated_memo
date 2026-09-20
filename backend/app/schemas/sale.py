@@ -27,6 +27,8 @@ class SaleItemCreate(BaseModel):
     unit_price:      Optional[Decimal] = None   # None = use variant.selling_price
     discount_amount: Decimal = Decimal("0")
     serials:         list[SerialSaleInput] = []  # required for serialized products
+    warranty_period: Optional[str] = None       # e.g. "1 Year", "2 Years", "7 Days", "No Warranty"
+    warranty_months: Optional[int] = None       # e.g. 12, 24, 0
     notes:           Optional[str] = None
 
     @field_validator("quantity")
@@ -73,6 +75,8 @@ class SaleItemResponse(BaseModel):
     unit_price:      Decimal
     discount_amount: Decimal
     total_price:     Decimal
+    warranty_period: Optional[str] = None
+    warranty_months: Optional[int] = None
     notes:           Optional[str] = None
     serial_count:    int = 0
     model_config = {"from_attributes": True}

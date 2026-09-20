@@ -13,6 +13,8 @@ export interface SaleItemCreate {
   quantity: number
   unit_price?: number       // undefined = use variant.selling_price
   discount_amount?: number
+  warranty_period?: string  // e.g. "1 Year", "2 Years", "7 Days", "No Warranty"
+  warranty_months?: number  // e.g. 12, 24, 0
   serials: SerialSaleInput[]
   notes?: string
 }
@@ -37,6 +39,8 @@ export interface SaleItemResponse {
   unit_price: number
   discount_amount: number
   total_price: number
+  warranty_period?: string | null
+  warranty_months?: number | null
   notes: string | null
   serial_count: number
 }

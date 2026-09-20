@@ -222,7 +222,14 @@ export default function SaleDetailPage() {
             <div key={item.id} className="px-4 py-3 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-gray-900 text-sm">{item.product_name}</p>
-                <p className="text-xs text-gray-500">{item.variant_name}{item.sku ? ` · ${item.sku}` : ''}</p>
+                <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                  <p className="text-xs text-gray-500">{item.variant_name}{item.sku ? ` · ${item.sku}` : ''}</p>
+                  {(item.warranty_period || (item.warranty_months && item.warranty_months > 0)) && (
+                    <span className="text-[11px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                      Warranty: {item.warranty_period || `${item.warranty_months} mo`}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="text-right flex-shrink-0">
                 <p className="text-sm font-semibold text-gray-900">{formatCurrency(item.total_price)}</p>

@@ -144,19 +144,14 @@ def list_warranty_units(
     for sn in all_serials:
         variant = sn.variant
         product = variant.product if variant else None
-        warranty_months = variant.warranty_months if variant else 0
-
-        ws, expiry, days = _compute_warranty_status(warranty_months, sn.sold_at, today)
-
-        if status_filter and ws != status_filter:
-            continue
-
         # Find which customer bought this via sale_item → sale → customer
         customer_name = None
         sale_number = None
         if sn.sale_item_id:
             item = db.query(SaleItem).filter(SaleItem.id == sn.sale_item_id).first()
             if item:
+                if item.warranty_months is not None:
+                    warranty_months = item.warranty_months
                 sale = db.query(Sale).filter(Sale.id == item.sale_id).first()
                 if sale:
                     sale_number = sale.sale_number
@@ -164,6 +159,11 @@ def list_warranty_units(
                         cust = db.query(Customer).filter(Customer.id == sale.customer_id).first()
                         if cust:
                             customer_name = cust.name
+
+        ws, expiry, days = _compute_warranty_status(warranty_months, sn.sold_at, today)
+
+        if status_filter and ws != status_filter:
+            continue
 
         # Count open claims
         open_claims = db.query(func.count(WarrantyClaim.id)).filter(
@@ -213,13 +213,13 @@ def get_warranty_unit(db: Session, serial_id: int, business_id: int) -> Warranty
     variant = sn.variant
     product = variant.product if variant else None
     warranty_months = variant.warranty_months if variant else 0
-    ws, expiry, days = _compute_warranty_status(warranty_months, sn.sold_at, today)
-
     customer_name = None
     sale_number = None
     if sn.sale_item_id:
         item = db.query(SaleItem).filter(SaleItem.id == sn.sale_item_id).first()
         if item:
+            if item.warranty_months is not None:
+                warranty_months = item.warranty_months
             sale = db.query(Sale).filter(Sale.id == item.sale_id).first()
             if sale:
                 sale_number = sale.sale_number
@@ -227,6 +227,8 @@ def get_warranty_unit(db: Session, serial_id: int, business_id: int) -> Warranty
                     cust = db.query(Customer).filter(Customer.id == sale.customer_id).first()
                     if cust:
                         customer_name = cust.name
+
+    ws, expiry, days = _compute_warranty_status(warranty_months, sn.sold_at, today)
 
     open_claims = db.query(func.count(WarrantyClaim.id)).filter(
         WarrantyClaim.serial_id == sn.id,
@@ -301,6 +303,11 @@ def file_claim(
     # Check warranty hasn't expired
     variant = sn.variant
     warranty_months = variant.warranty_months if variant else 0
+    if sn.sale_item_id:
+        item = db.query(SaleItem).filter(SaleItem.id == sn.sale_item_id).first()
+        if item and item.warranty_months is not None:
+            warranty_months = item.warranty_months
+
     ws, expiry, _ = _compute_warranty_status(warranty_months, sn.sold_at, today)
 
     if ws == "NO_WARRANTY":

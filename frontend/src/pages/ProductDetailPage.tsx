@@ -126,7 +126,7 @@ export default function ProductDetailPage() {
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Total Stock',   value: product.total_stock, icon: Package,      color: 'text-blue-600',  bg: 'bg-blue-50' },
+          { label: 'Total Stock',   value: (product.total_stock ?? 0) <= 0 ? 'Stock Out' : product.total_stock, icon: Package, color: (product.total_stock ?? 0) <= 0 ? 'text-red-600' : 'text-blue-600', bg: (product.total_stock ?? 0) <= 0 ? 'bg-red-50' : 'bg-blue-50' },
           { label: 'Variants',      value: activeVariants.length, icon: Barcode,    color: 'text-purple-600', bg: 'bg-purple-50' },
           { label: 'Min Price',     value: formatCurrency(Math.min(...activeVariants.map(v => Number(v.selling_price)))), icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
           { label: 'Max Warranty',  value: `${Math.max(...activeVariants.map(v => v.warranty_months), 0)} mo`, icon: Shield, color: 'text-orange-600', bg: 'bg-orange-50' },
@@ -186,11 +186,19 @@ export default function ProductDetailPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <span className={`font-semibold ${v.current_stock <= v.reorder_level ? 'text-red-500' : 'text-gray-900'}`}>
-                      {v.current_stock}
-                    </span>
-                    {v.current_stock <= v.reorder_level && (
-                      <AlertTriangle size={12} className="inline ml-1 text-amber-500" />
+                    {v.current_stock <= 0 ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700">
+                        Stock Out
+                      </span>
+                    ) : (
+                      <>
+                        <span className={`font-semibold ${v.current_stock <= v.reorder_level ? 'text-red-500' : 'text-gray-900'}`}>
+                          {v.current_stock}
+                        </span>
+                        {v.current_stock <= v.reorder_level && (
+                          <AlertTriangle size={12} className="inline ml-1 text-amber-500" />
+                        )}
+                      </>
                     )}
                   </td>
                   <td className="px-5 py-3.5 text-gray-500">

@@ -104,7 +104,7 @@ def _build_product_response(product: Product) -> ProductResponse:
             except Exception:
                 in_stock = 0
 
-        stock_val = max(v.current_stock, in_stock) if product.is_serialized else v.current_stock
+        stock_val = v.current_stock
         vr = VariantResponse(
             id=v.id,
             product_id=v.product_id,
@@ -201,7 +201,7 @@ def list_products(
                     selling_price=v.selling_price,
                     warranty_months=v.warranty_months or 0,
                     reorder_level=v.reorder_level or 0,
-                    current_stock=max(v.current_stock, v.in_stock_count) if p.is_serialized else v.current_stock,
+                    current_stock=v.current_stock,
                     other_specs=v.other_specs,
                     is_active=v.is_active,
                     created_at=v.created_at,
