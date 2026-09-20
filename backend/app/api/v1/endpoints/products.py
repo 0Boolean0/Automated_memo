@@ -11,7 +11,7 @@ PUT    /variants/{id}             → update variant (records price history)
 GET    /variants/{id}/price-history → audit trail of price changes
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -22,7 +22,8 @@ from app.schemas.product import (
     ProductCreate, ProductUpdate, ProductResponse,
     ProductListResponse, PaginatedProducts,
     VariantCreate, VariantUpdate, VariantResponse,
-    PriceHistoryResponse,
+    PriceHistoryResponse, InStockProductItem,
+    QuickLookupResult, ScanImageResponse,
 )
 from app.services import product_service
 
@@ -63,20 +64,56 @@ def create_product(
 def scan_product(
     barcode: Optional[str] = Query(None),
     sku:     Optional[str] = Query(None),
+    serial:  Optional[str] = Query(None),
     current_user: User = Depends(require_permission("view_products")),
     db: Session = Depends(get_db),
 ):
     """
-    Look up a product variant by barcode or SKU.
-    Used by the barcode scanner page.
-
-    Query params (at least one required):
-    - barcode: the barcode value scanned from camera
-    - sku: the variant SKU to look up
+    Look up a product variant by barcode, SKU, or serial number.
+    Used by the barcode scanner page and POS.
     """
     return product_service.lookup_by_scan(
-        db, current_user.business_id, barcode=barcode, sku=sku
+        db, current_user.business_id, barcode=barcode, sku=sku, serial=serial
     )
+
+
+@router.get("/in-stock-catalog", response_model=list[InStockProductItem], tags=["products"])
+def get_in_stock_catalog(
+    current_user: User = Depends(require_permission("view_products")),
+    db: Session = Depends(get_db),
+):
+    """
+    Get all active products and variants that have current_stock > 0,
+    along with their available in-stock serial numbers.
+    """
+    return product_service.get_in_stock_catalog(db, current_user.business_id)
+
+
+@router.get("/quick-lookup", response_model=list[QuickLookupResult], tags=["products"])
+def quick_lookup(
+    q: str = Query(..., min_length=1, description="Serial, barcode, SKU, or name search"),
+    current_user: User = Depends(require_permission("view_products")),
+    db: Session = Depends(get_db),
+):
+    """
+    Quick search across serial numbers, barcodes, SKUs, and product names.
+    Returns matching variants with auto-detected match_type and matched_serial.
+    """
+    return product_service.lookup_by_query(db, current_user.business_id, q)
+
+
+@router.post("/scan-image", response_model=ScanImageResponse, tags=["products"])
+async def scan_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_permission("view_products")),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload an image of a serial number sticker, barcode, or label.
+    Extracts text using OCR and matches against in-stock products and serials.
+    """
+    image_bytes = await file.read()
+    return product_service.scan_image_for_code(db, current_user.business_id, image_bytes)
 
 
 @router.get("/{product_id}", response_model=ProductResponse)

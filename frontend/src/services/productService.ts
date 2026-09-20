@@ -96,6 +96,54 @@ export interface ScanResult {
   in_stock_serials: number | null
   is_low_stock: boolean
   warranty_months: number
+  matched_serial?: string | null
+}
+
+export interface InStockVariantItem {
+  id: number
+  product_id: number
+  name: string
+  sku: string | null
+  barcode: string | null
+  selling_price: number
+  cost_price: number
+  warranty_months: number
+  current_stock: number
+  available_serials: string[]
+}
+
+export interface InStockProductItem {
+  id: number
+  name: string
+  brand_name: string | null
+  category_name: string | null
+  is_serialized: boolean
+  total_stock: number
+  variants: InStockVariantItem[]
+}
+
+export interface QuickLookupResult {
+  match_type: 'serial' | 'barcode' | 'sku' | 'name'
+  matched_serial: string | null
+  product_id: number
+  product_name: string
+  is_serialized: boolean
+  variant_id: number
+  variant_name: string
+  sku: string | null
+  barcode: string | null
+  selling_price: number
+  current_stock: number
+  warranty_months: number
+  available_serials: string[]
+}
+
+export interface ScanImageResponse {
+  found: boolean
+  raw_text: string
+  detected_code: string | null
+  match: QuickLookupResult | null
+  message: string | null
 }
 
 export interface ProductListParams {
@@ -196,11 +244,28 @@ export const productService = {
   getPriceHistory: (variantId: number) =>
     api.get<PriceHistory[]>(`/products/variants/${variantId}/price-history`).then(r => r.data),
 
-  /** Phase 6: Look up a variant by barcode or SKU (barcode scanner). */
-  scan: (params: { barcode?: string; sku?: string }) =>
+  /** Look up a variant by barcode, SKU, or serial number. */
+  scan: (params: { barcode?: string; sku?: string; serial?: string }) =>
     api.get<ScanResult>('/products/scan', { params }).then(r => r.data),
 
   /** Get available in-stock serial numbers for a variant. */
   getInStockSerials: (variantId: number) =>
     api.get<string[]>(`/products/variants/${variantId}/serials/in-stock`).then(r => r.data),
+
+  /** Get all active products and variants in stock with their serial numbers. */
+  getInStockCatalog: () =>
+    api.get<InStockProductItem[]>('/products/in-stock-catalog').then(r => r.data),
+
+  /** Quick search across serials, barcodes, SKUs, and names. */
+  quickLookup: (q: string) =>
+    api.get<QuickLookupResult[]>('/products/quick-lookup', { params: { q } }).then(r => r.data),
+
+  /** Upload an image (photo of barcode/serial sticker) for automatic detection. */
+  scanImage: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<ScanImageResponse>('/products/scan-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
 }

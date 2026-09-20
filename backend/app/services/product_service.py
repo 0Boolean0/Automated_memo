@@ -447,24 +447,52 @@ def get_variant_price_history(db: Session, variant_id: int, business_id: int) ->
     )
 
 
-# ─── Barcode / SKU scan lookup ────────────────────────────────────────────────
+# ─── Barcode / SKU / Serial scan lookup ────────────────────────────────────────
 
 def lookup_by_scan(
     db: Session,
     business_id: int,
     barcode: str | None = None,
     sku: str | None = None,
+    serial: str | None = None,
 ) -> dict:
     """
-    Look up a product variant by barcode or SKU.
-
-    Used by the barcode scanner page (Phase 6).
+    Look up a product variant by barcode, SKU, or serial number.
     Returns the variant with its parent product details and current stock.
-
-    Raises 404 if not found.
     """
-    if not barcode and not sku:
-        raise HTTPException(status_code=422, detail="Provide barcode or sku")
+    if not barcode and not sku and not serial:
+        raise HTTPException(status_code=422, detail="Provide barcode, sku, or serial")
+
+    # If serial is provided, search serial numbers first
+    if serial:
+        sn = db.query(SerialNumber).filter(
+            SerialNumber.business_id == business_id,
+            SerialNumber.status == "IN_STOCK",
+            func.upper(SerialNumber.serial) == serial.strip().upper(),
+        ).first()
+        if sn:
+            variant = sn.variant
+            product = variant.product
+            in_stock_serials = variant.serials.filter_by(status="IN_STOCK").count() if product.is_serialized else None
+            return {
+                "variant_id":       variant.id,
+                "variant_name":     variant.name,
+                "sku":              variant.sku,
+                "barcode":          variant.barcode,
+                "product_id":       product.id,
+                "product_name":     product.name,
+                "is_serialized":    product.is_serialized,
+                "brand_name":       product.brand.name if product.brand else None,
+                "category_name":    product.category.name if product.category else None,
+                "cost_price":       float(variant.cost_price),
+                "selling_price":    float(variant.selling_price),
+                "current_stock":    variant.current_stock,
+                "reorder_level":    variant.reorder_level,
+                "in_stock_serials": in_stock_serials,
+                "is_low_stock":     variant.current_stock < variant.reorder_level,
+                "warranty_months":  variant.warranty_months,
+                "matched_serial":   sn.serial,
+            }
 
     query = (
         db.query(ProductVariant)
@@ -483,9 +511,10 @@ def lookup_by_scan(
 
     variant: ProductVariant | None = query.first()
     if not variant:
+        search_term = barcode or sku or serial
         raise HTTPException(
             status_code=404,
-            detail=f"No product found for {'barcode=' + barcode if barcode else 'sku=' + sku}",
+            detail=f"No product found for '{search_term}'",
         )
 
     product = variant.product
@@ -508,4 +537,321 @@ def lookup_by_scan(
         "in_stock_serials": in_stock_serials,
         "is_low_stock":     variant.current_stock < variant.reorder_level,
         "warranty_months":  variant.warranty_months,
+        "matched_serial":   None,
+    }
+
+
+def get_in_stock_catalog(db: Session, business_id: int) -> list[dict]:
+    """
+    Get all active products and variants that have stock > 0,
+    including their available in-stock serial numbers.
+    """
+    products = (
+        db.query(Product)
+        .filter(Product.business_id == business_id, Product.is_active == True)
+        .order_by(Product.name.asc())
+        .all()
+    )
+    catalog = []
+    for p in products:
+        in_stock_variants = []
+        for v in p.variants:
+            if not v.is_active or v.current_stock <= 0:
+                continue
+            serials = []
+            if p.is_serialized:
+                sn_rows = (
+                    db.query(SerialNumber.serial)
+                    .filter(
+                        SerialNumber.variant_id == v.id,
+                        SerialNumber.business_id == business_id,
+                        SerialNumber.status == "IN_STOCK",
+                    )
+                    .order_by(SerialNumber.id.asc())
+                    .all()
+                )
+                serials = [s[0] for s in sn_rows]
+
+            in_stock_variants.append({
+                "id": v.id,
+                "product_id": p.id,
+                "name": v.name,
+                "sku": v.sku,
+                "barcode": v.barcode,
+                "selling_price": float(v.selling_price),
+                "cost_price": float(v.cost_price),
+                "warranty_months": v.warranty_months,
+                "current_stock": v.current_stock,
+                "available_serials": serials,
+            })
+
+        if in_stock_variants:
+            catalog.append({
+                "id": p.id,
+                "name": p.name,
+                "brand_name": p.brand.name if p.brand else None,
+                "category_name": p.category.name if p.category else None,
+                "is_serialized": p.is_serialized,
+                "total_stock": sum(var["current_stock"] for var in in_stock_variants),
+                "variants": in_stock_variants,
+            })
+
+    return catalog
+
+
+def lookup_by_query(db: Session, business_id: int, q: str) -> list[dict]:
+    """
+    Multi-mode quick search across serial numbers, barcodes, SKUs, and product/variant names.
+    Returns matching variants with match_type and pre-assigned matched_serial if applicable.
+    """
+    query_str = q.strip()
+    if not query_str:
+        return []
+
+    results = []
+    seen_keys = set()
+
+    # 1. Search in-stock serial numbers (exact and substring)
+    sn_matches = (
+        db.query(SerialNumber)
+        .join(ProductVariant, SerialNumber.variant_id == ProductVariant.id)
+        .join(Product, ProductVariant.product_id == Product.id)
+        .filter(
+            SerialNumber.business_id == business_id,
+            SerialNumber.status == "IN_STOCK",
+            SerialNumber.serial.ilike(f"%{query_str}%"),
+        )
+        .limit(10)
+        .all()
+    )
+    for sn in sn_matches:
+        v = sn.variant
+        p = v.product
+        key = (v.id, sn.serial)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            other_serials = [
+                s[0] for s in db.query(SerialNumber.serial)
+                .filter(SerialNumber.variant_id == v.id, SerialNumber.status == "IN_STOCK")
+                .all()
+            ]
+            results.append({
+                "match_type": "serial",
+                "matched_serial": sn.serial,
+                "product_id": p.id,
+                "product_name": p.name,
+                "is_serialized": p.is_serialized,
+                "variant_id": v.id,
+                "variant_name": v.name,
+                "sku": v.sku,
+                "barcode": v.barcode,
+                "selling_price": float(v.selling_price),
+                "current_stock": v.current_stock,
+                "warranty_months": v.warranty_months,
+                "available_serials": other_serials,
+            })
+
+    # 2. Search barcode or SKU or Name
+    variant_matches = (
+        db.query(ProductVariant)
+        .join(Product)
+        .filter(
+            Product.business_id == business_id,
+            ProductVariant.is_active == True,
+            or_(
+                ProductVariant.barcode.ilike(f"%{query_str}%"),
+                ProductVariant.sku.ilike(f"%{query_str}%"),
+                Product.name.ilike(f"%{query_str}%"),
+                ProductVariant.name.ilike(f"%{query_str}%"),
+            ),
+        )
+        .limit(10)
+        .all()
+    )
+    for v in variant_matches:
+        p = v.product
+        key = (v.id, None)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            serials = []
+            if p.is_serialized:
+                serials = [
+                    s[0] for s in db.query(SerialNumber.serial)
+                    .filter(SerialNumber.variant_id == v.id, SerialNumber.status == "IN_STOCK")
+                    .all()
+                ]
+            match_type = (
+                "barcode" if (v.barcode and query_str.lower() in v.barcode.lower()) else
+                "sku" if (v.sku and query_str.lower() in v.sku.lower()) else "name"
+            )
+            results.append({
+                "match_type": match_type,
+                "matched_serial": serials[0] if (serials and p.is_serialized) else None,
+                "product_id": p.id,
+                "product_name": p.name,
+                "is_serialized": p.is_serialized,
+                "variant_id": v.id,
+                "variant_name": v.name,
+                "sku": v.sku,
+                "barcode": v.barcode,
+                "selling_price": float(v.selling_price),
+                "current_stock": v.current_stock,
+                "warranty_months": v.warranty_months,
+                "available_serials": serials,
+            })
+
+    return results
+
+
+def scan_image_for_code(db: Session, business_id: int, image_bytes: bytes) -> dict:
+    """
+    Process an uploaded image using OCR to extract candidate serial numbers or barcodes,
+    and find matching products in stock.
+    """
+    import io
+    import re
+    from PIL import Image
+
+    try:
+        pil_img = Image.open(io.BytesIO(image_bytes))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid image file: {str(e)}")
+
+    raw_text = ""
+    try:
+        import winocr, asyncio
+        ocr_res = asyncio.run(winocr.recognize_pil(pil_img, "en"))
+        if hasattr(ocr_res, "text"):
+            raw_text = ocr_res.text
+        elif isinstance(ocr_res, dict):
+            raw_text = ocr_res.get("text", "")
+    except Exception as e:
+        # If winocr fails or is unavailable, fallback gracefully
+        raw_text = ""
+
+    # Extract alphanumeric candidate tokens from text
+    tokens = re.findall(r'[A-Za-z0-9][A-Za-z0-9_\-\.]{2,}', raw_text)
+
+    # 1. Exact match on serial number
+    for token in tokens:
+        clean_token = token.strip().upper()
+        sn = db.query(SerialNumber).filter(
+            SerialNumber.business_id == business_id,
+            SerialNumber.status == "IN_STOCK",
+            func.upper(SerialNumber.serial) == clean_token
+        ).first()
+        if sn:
+            v = sn.variant
+            p = v.product
+            serials = [
+                s[0] for s in db.query(SerialNumber.serial)
+                .filter(SerialNumber.variant_id == v.id, SerialNumber.status == "IN_STOCK")
+                .all()
+            ]
+            return {
+                "found": True,
+                "raw_text": raw_text,
+                "detected_code": sn.serial,
+                "match": {
+                    "match_type": "serial",
+                    "matched_serial": sn.serial,
+                    "product_id": p.id,
+                    "product_name": p.name,
+                    "is_serialized": p.is_serialized,
+                    "variant_id": v.id,
+                    "variant_name": v.name,
+                    "sku": v.sku,
+                    "barcode": v.barcode,
+                    "selling_price": float(v.selling_price),
+                    "current_stock": v.current_stock,
+                    "warranty_months": v.warranty_months,
+                    "available_serials": serials,
+                },
+                "message": f"Found matching serial number: {sn.serial}",
+            }
+
+        # 2. Exact match on barcode or SKU
+        v = db.query(ProductVariant).join(Product).filter(
+            Product.business_id == business_id,
+            ProductVariant.is_active == True,
+            or_(
+                func.upper(ProductVariant.barcode) == clean_token,
+                func.upper(ProductVariant.sku) == clean_token,
+            )
+        ).first()
+        if v:
+            p = v.product
+            serials = [
+                s[0] for s in db.query(SerialNumber.serial)
+                .filter(SerialNumber.variant_id == v.id, SerialNumber.status == "IN_STOCK")
+                .all()
+            ] if p.is_serialized else []
+            match_type = "barcode" if (v.barcode and clean_token in v.barcode.upper()) else "sku"
+            return {
+                "found": True,
+                "raw_text": raw_text,
+                "detected_code": clean_token,
+                "match": {
+                    "match_type": match_type,
+                    "matched_serial": serials[0] if serials else None,
+                    "product_id": p.id,
+                    "product_name": p.name,
+                    "is_serialized": p.is_serialized,
+                    "variant_id": v.id,
+                    "variant_name": v.name,
+                    "sku": v.sku,
+                    "barcode": v.barcode,
+                    "selling_price": float(v.selling_price),
+                    "current_stock": v.current_stock,
+                    "warranty_months": v.warranty_months,
+                    "available_serials": serials,
+                },
+                "message": f"Found matching {match_type.upper()}: {clean_token}",
+            }
+
+    # 3. Partial substring match on serial number (minimum 4 chars)
+    for token in tokens:
+        clean_token = token.strip()
+        if len(clean_token) >= 4:
+            sn = db.query(SerialNumber).filter(
+                SerialNumber.business_id == business_id,
+                SerialNumber.status == "IN_STOCK",
+                SerialNumber.serial.ilike(f"%{clean_token}%")
+            ).first()
+            if sn:
+                v = sn.variant
+                p = v.product
+                serials = [
+                    s[0] for s in db.query(SerialNumber.serial)
+                    .filter(SerialNumber.variant_id == v.id, SerialNumber.status == "IN_STOCK")
+                    .all()
+                ]
+                return {
+                    "found": True,
+                    "raw_text": raw_text,
+                    "detected_code": sn.serial,
+                    "match": {
+                        "match_type": "serial",
+                        "matched_serial": sn.serial,
+                        "product_id": p.id,
+                        "product_name": p.name,
+                        "is_serialized": p.is_serialized,
+                        "variant_id": v.id,
+                        "variant_name": v.name,
+                        "sku": v.sku,
+                        "barcode": v.barcode,
+                        "selling_price": float(v.selling_price),
+                        "current_stock": v.current_stock,
+                        "warranty_months": v.warranty_months,
+                        "available_serials": serials,
+                    },
+                    "message": f"Partially matched serial: {sn.serial} (from '{clean_token}')",
+                }
+
+    return {
+        "found": False,
+        "raw_text": raw_text,
+        "detected_code": tokens[0] if tokens else None,
+        "match": None,
+        "message": "No matching in-stock product or serial was found in the image." if raw_text else "Could not detect clear text or barcode from image.",
     }

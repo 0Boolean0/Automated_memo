@@ -8,7 +8,7 @@
  *   Step 4 — Review & confirm
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -17,13 +17,24 @@ import {
   ChevronRight, ChevronLeft, Check, Plus, Trash2,
   Loader2, Users, Package, Tag, ClipboardList, Star,
   ScanLine, Printer, Download, Sparkles, Shield,
+  Search, Camera, Upload, Hash, CheckCircle2, AlertCircle,
+  X, ChevronDown, ChevronUp, Layers, Image as ImageIcon,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { BrowserMultiFormatReader } from '@zxing/browser'
 import api from '@/services/api'
 import Modal from '@/components/ui/Modal'
 import BarcodeScanner from '@/components/scanner/BarcodeScanner'
 import { customerService, type CustomerListItem } from '@/services/customerService'
-import { productService, type Product, type ProductVariant } from '@/services/productService'
+import {
+  productService,
+  type Product,
+  type ProductVariant,
+  type InStockProductItem,
+  type InStockVariantItem,
+  type QuickLookupResult,
+  type ScanImageResponse,
+} from '@/services/productService'
 import { saleService, type SaleItemCreate, type Sale } from '@/services/saleService'
 import { formatCurrency } from '@/utils/format'
 
@@ -181,6 +192,337 @@ function StepCustomer({
   )
 }
 
+// ─── Photo / Picture Scan Modal ────────────────────────────────────────────────
+
+function PhotoScanModal({
+  isOpen,
+  onClose,
+  onAddMatch,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onAddMatch: (match: QuickLookupResult) => void
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [scanResult, setScanResult] = useState<ScanImageResponse | null>(null)
+  const [manualCode, setManualCode] = useState('')
+  const [manualLoading, setManualLoading] = useState(false)
+
+  const resetState = () => {
+    setImageFile(null)
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+    setImagePreview(null)
+    setAnalyzing(false)
+    setScanResult(null)
+    setManualCode('')
+    setManualLoading(false)
+  }
+
+  const handleClose = () => {
+    resetState()
+    onClose()
+  }
+
+  const processFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file (JPEG, PNG, etc.)')
+      return
+    }
+    setImageFile(file)
+    const previewUrl = URL.createObjectURL(file)
+    setImagePreview(previewUrl)
+    setAnalyzing(true)
+    setScanResult(null)
+
+    let barcodeDetected: string | null = null
+
+    // 1. Try client-side ZXing barcode decode first
+    try {
+      const reader = new BrowserMultiFormatReader()
+      const zxRes = await reader.decodeFromImageUrl(previewUrl)
+      if (zxRes && zxRes.getText()) {
+        barcodeDetected = zxRes.getText()
+      }
+    } catch {
+      // No barcode found by ZXing — continue to backend OCR
+    }
+
+    if (barcodeDetected) {
+      try {
+        const matches = await productService.quickLookup(barcodeDetected)
+        if (matches && matches.length > 0) {
+          setScanResult({
+            found: true,
+            raw_text: barcodeDetected,
+            detected_code: barcodeDetected,
+            match: matches[0],
+            message: `Detected barcode from image: ${barcodeDetected}`,
+          })
+          setAnalyzing(false)
+          return
+        }
+      } catch {
+        // Continue to backend OCR
+      }
+    }
+
+    // 2. Call backend OCR (Windows native OCR)
+    try {
+      const ocrRes = await productService.scanImage(file)
+      setScanResult(ocrRes)
+    } catch {
+      setScanResult({
+        found: false,
+        raw_text: '',
+        detected_code: barcodeDetected,
+        match: null,
+        message: 'Could not detect code. You can enter or edit the code manually below.',
+      })
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const handleManualSearch = async () => {
+    const q = manualCode.trim()
+    if (!q) return
+    setManualLoading(true)
+    try {
+      const matches = await productService.quickLookup(q)
+      if (matches && matches.length > 0) {
+        setScanResult({
+          found: true,
+          raw_text: q,
+          detected_code: q,
+          match: matches[0],
+          message: `Found match for: ${q}`,
+        })
+      } else {
+        toast.error(`No in-stock product or serial found for "${q}"`)
+      }
+    } catch {
+      toast.error(`Lookup failed for "${q}"`)
+    } finally {
+      setManualLoading(false)
+    }
+  }
+
+  // Handle Ctrl+V paste while modal is open
+  useEffect(() => {
+    if (!isOpen) return
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (file) {
+            processFile(file)
+            break
+          }
+        }
+      }
+    }
+    window.addEventListener('paste', handlePaste)
+    return () => window.removeEventListener('paste', handlePaste)
+  }, [isOpen])
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title="Photo / Picture Scan (Barcode or Serial Sticker)"
+      maxWidth="lg"
+    >
+      <div className="space-y-4">
+        <p className="text-xs text-gray-500">
+          Take a picture or upload an image of a serial number sticker, barcode, or product label.
+          The system will automatically recognize the barcode or OCR the serial text to find the matching item.
+        </p>
+
+        {/* Upload / Capture Dropzone */}
+        {!imagePreview ? (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => {
+              e.preventDefault()
+              if (e.dataTransfer.files?.[0]) {
+                processFile(e.dataTransfer.files[0])
+              }
+            }}
+            className="border-2 border-dashed border-primary-200 hover:border-primary-400 bg-primary-50/40 hover:bg-primary-50 rounded-xl p-8 text-center cursor-pointer transition-colors"
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              capture="environment"
+              onChange={e => {
+                if (e.target.files?.[0]) {
+                  processFile(e.target.files[0])
+                }
+              }}
+              className="hidden"
+            />
+            <div className="flex justify-center gap-3 text-primary-600 mb-2">
+              <Camera size={32} />
+              <Upload size={32} />
+            </div>
+            <p className="text-sm font-semibold text-gray-800">
+              Click to Take Photo or Upload Image
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Supports Camera Snap, File Browse, Drag & Drop, or Paste from Clipboard (Ctrl+V)
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* Image Preview & Controls */}
+            <div className="relative border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <img
+                  src={imagePreview}
+                  alt="Captured code"
+                  className="w-16 h-16 object-cover rounded border border-gray-300 bg-white"
+                />
+                <div>
+                  <p className="text-xs font-medium text-gray-700">{imageFile?.name ?? 'Captured Photo'}</p>
+                  <p className="text-xs text-gray-400">{(Number(imageFile?.size ?? 0) / 1024).toFixed(1)} KB</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  resetState()
+                  fileInputRef.current?.click()
+                }}
+                className="px-3 py-1.5 text-xs font-medium text-primary-600 hover:bg-primary-50 rounded-lg transition-colors border border-primary-200"
+              >
+                Change Photo
+              </button>
+            </div>
+
+            {/* Analysis State */}
+            {analyzing && (
+              <div className="p-5 border border-blue-100 bg-blue-50/60 rounded-xl flex items-center justify-center gap-3 text-blue-700 text-sm font-medium">
+                <Loader2 size={20} className="animate-spin text-blue-600" />
+                Scanning barcode and running OCR text recognition…
+              </div>
+            )}
+
+            {/* Analysis Result */}
+            {!analyzing && scanResult && (
+              <div className="space-y-3">
+                {scanResult.found && scanResult.match ? (
+                  <div className="p-4 border border-green-200 bg-green-50 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-green-800">
+                        <CheckCircle2 size={16} className="text-green-600" />
+                        {scanResult.message}
+                      </span>
+                      <span className="px-2 py-0.5 bg-green-200 text-green-800 rounded text-xs font-mono font-bold uppercase">
+                        {scanResult.match.match_type}
+                      </span>
+                    </div>
+
+                    <div className="bg-white p-3 rounded-lg border border-green-100 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-gray-900 text-sm">
+                          {scanResult.match.product_name}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {scanResult.match.variant_name}
+                          {scanResult.match.sku ? ` · SKU: ${scanResult.match.sku}` : ''}
+                        </p>
+                        {scanResult.match.matched_serial && (
+                          <span className="inline-block mt-1 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 rounded text-xs font-mono font-bold">
+                            #{scanResult.match.matched_serial}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-gray-900 text-sm">
+                          ৳{scanResult.match.selling_price.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-green-600">
+                          {scanResult.match.current_stock} in stock
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onAddMatch(scanResult.match!)
+                          handleClose()
+                        }}
+                        className="btn-primary flex items-center gap-1.5 text-sm py-2 px-4 shadow-sm"
+                      >
+                        <Plus size={16} /> Add to Cart
+                        {scanResult.match.matched_serial ? ' with Serial' : ''}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 border border-amber-200 bg-amber-50 rounded-xl space-y-2">
+                    <div className="flex items-start gap-2 text-amber-800 text-xs">
+                      <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold">{scanResult.message}</p>
+                        {scanResult.raw_text && (
+                          <p className="mt-1 text-gray-600 font-mono text-[11px] bg-white/70 p-1.5 rounded border border-amber-100">
+                            Raw OCR Text: "{scanResult.raw_text}"
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Manual Search Fallback */}
+                    <div className="pt-2 border-t border-amber-200/60">
+                      <p className="text-xs text-gray-600 mb-1.5 font-medium">
+                        Type or edit the serial/barcode manually:
+                      </p>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          className="input text-xs py-1.5 flex-1 bg-white"
+                          placeholder="e.g. CA-9011386-AP-260918-0011"
+                          value={manualCode}
+                          onChange={e => setManualCode(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleManualSearch() }}
+                        />
+                        <button
+                          type="button"
+                          disabled={manualLoading || !manualCode.trim()}
+                          onClick={handleManualSearch}
+                          className="px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700 disabled:opacity-50"
+                        >
+                          {manualLoading ? 'Searching…' : 'Search'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end pt-2">
+          <button type="button" className="btn-secondary text-xs" onClick={handleClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Step 2: Cart ─────────────────────────────────────────────────────────────
 
 function StepCart({
@@ -192,67 +534,221 @@ function StepCart({
   onNext: () => void
 }) {
   const [products, setProducts] = useState<Product[]>([])
+  const [inStockCatalog, setInStockCatalog] = useState<InStockProductItem[]>([])
+  const [catalogFilter, setCatalogFilter] = useState('')
+  const [showCatalog, setShowCatalog] = useState(false)
+
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
   const [warrantyOption, setWarrantyOption] = useState<string>('DEFAULT')
   const [customWarranty, setCustomWarranty] = useState<string>('')
   const [qty, setQty] = useState(1)
+
   const [showScanModal, setShowScanModal] = useState(false)
+  const [showPhotoModal, setShowPhotoModal] = useState(false)
+
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<QuickLookupResult[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+
+  // Load products list and in-stock catalog
+  const loadCatalog = useCallback(async () => {
+    try {
+      const cat = await productService.getInStockCatalog()
+      setInStockCatalog(cat)
+    } catch {
+      // ignore
+    }
+  }, [])
 
   useEffect(() => {
     productService.list({ per_page: 200, is_active: true })
       .then(r => setProducts(r.items as unknown as Product[]))
       .catch(() => toast.error('Failed to load products'))
-  }, [])
+    loadCatalog()
+  }, [loadCatalog])
 
-  const handleBarcodeScan = async (barcode: string) => {
+  // Quick lookup search debounce
+  useEffect(() => {
+    const q = searchQuery.trim()
+    if (!q) {
+      setSearchResults([])
+      setShowSearchDropdown(false)
+      return
+    }
+    const timer = setTimeout(async () => {
+      setIsSearching(true)
+      try {
+        const results = await productService.quickLookup(q)
+        setSearchResults(results)
+        setShowSearchDropdown(true)
+      } catch {
+        setSearchResults([])
+      } finally {
+        setIsSearching(false)
+      }
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Centralized helper to add item to cart
+  const addItemToCart = (
+    variant: ProductVariant,
+    product: Product,
+    quantity = 1,
+    preAssignedSerial?: string,
+    warrantyStr?: string,
+    warrantyMo?: number,
+  ) => {
+    if (variant.current_stock <= 0) {
+      toast.error(`${product.name} (${variant.name}) is out of stock!`)
+      return
+    }
+    const defW = formatDefaultWarranty(variant.warranty_months)
+    const wPeriod = warrantyStr ?? defW.period
+    const wMonths = warrantyMo ?? defW.months
+
+    const existingIdx = cart.findIndex(i => i.variant.id === variant.id && i.warranty_period === wPeriod)
+    if (existingIdx >= 0) {
+      const updated = [...cart]
+      updated[existingIdx].quantity += quantity
+      if (preAssignedSerial) {
+        if (!updated[existingIdx].serials.includes(preAssignedSerial)) {
+          updated[existingIdx].serials.push(preAssignedSerial)
+        }
+      }
+      onUpdateCart(updated)
+    } else {
+      onUpdateCart([...cart, {
+        variant,
+        product,
+        quantity,
+        unit_price: Number(variant.selling_price),
+        discount: 0,
+        warranty_period: wPeriod,
+        warranty_months: wMonths,
+        serials: preAssignedSerial ? [preAssignedSerial] : [],
+      }])
+    }
+    toast.success(
+      preAssignedSerial
+        ? `Added ${product.name} (${variant.name}) [Serial: #${preAssignedSerial}]`
+        : `Added ${product.name} (${variant.name}) to cart`
+    )
+  }
+
+  // Handle Quick Search selection
+  const handleSelectSearchResult = (res: QuickLookupResult) => {
+    if (res.matched_serial && cart.some(ci => ci.serials.includes(res.matched_serial!))) {
+      toast.error(`Serial #${res.matched_serial} is already in the cart!`)
+      return
+    }
+    let p = products.find(prod => prod.id === res.product_id)
+    let v = p?.variants?.find(varnt => varnt.id === res.variant_id)
+    if (!p || !v) {
+      p = {
+        id: res.product_id,
+        business_id: 1,
+        name: res.product_name,
+        description: null,
+        brand_id: null,
+        brand_name: null,
+        category_id: null,
+        category_name: null,
+        is_serialized: res.is_serialized,
+        is_active: true,
+        total_stock: res.current_stock,
+        variants: [],
+        created_at: new Date().toISOString(),
+      } as Product
+      v = {
+        id: res.variant_id,
+        product_id: res.product_id,
+        name: res.variant_name,
+        sku: res.sku,
+        barcode: res.barcode,
+        cost_price: 0,
+        selling_price: res.selling_price,
+        warranty_months: res.warranty_months,
+        reorder_level: 0,
+        current_stock: res.current_stock,
+        in_stock_serials: res.available_serials.length,
+        other_specs: null,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      } as ProductVariant
+    }
+    addItemToCart(v, p, 1, res.matched_serial ?? undefined)
+    setSearchQuery('')
+    setShowSearchDropdown(false)
+  }
+
+  // Handle addition from in-stock catalog
+  const handleAddFromCatalog = (
+    pItem: InStockProductItem,
+    vItem: InStockVariantItem,
+    serial?: string,
+  ) => {
+    if (serial && cart.some(ci => ci.serials.includes(serial))) {
+      toast.error(`Serial #${serial} is already in the cart!`)
+      return
+    }
+    let p = products.find(prod => prod.id === pItem.id)
+    let v = p?.variants?.find(varnt => varnt.id === vItem.id)
+    if (!p || !v) {
+      p = {
+        id: pItem.id,
+        business_id: 1,
+        name: pItem.name,
+        description: null,
+        brand_id: null,
+        brand_name: pItem.brand_name,
+        category_id: null,
+        category_name: pItem.category_name,
+        is_serialized: pItem.is_serialized,
+        is_active: true,
+        total_stock: pItem.total_stock,
+        variants: [],
+        created_at: new Date().toISOString(),
+      } as Product
+      v = {
+        id: vItem.id,
+        product_id: pItem.id,
+        name: vItem.name,
+        sku: vItem.sku,
+        barcode: vItem.barcode,
+        cost_price: vItem.cost_price,
+        selling_price: vItem.selling_price,
+        warranty_months: vItem.warranty_months,
+        reorder_level: 0,
+        current_stock: vItem.current_stock,
+        in_stock_serials: vItem.available_serials.length,
+        other_specs: null,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      } as ProductVariant
+    }
+    addItemToCart(v, p, 1, serial)
+  }
+
+  // Handle Live Camera Barcode Scan
+  const handleBarcodeScan = async (code: string) => {
     try {
-      const res = await productService.scan({ barcode })
-      if (!res) {
-        toast.error(`Barcode ${barcode} not found`)
+      const results = await productService.quickLookup(code)
+      if (results && results.length > 0) {
+        handleSelectSearchResult(results[0])
         return
       }
-      let p = products.find(prod => prod.id === res.product_id)
-      if (!p) {
-        p = await productService.get(res.product_id)
-      }
-      const v = p?.variants?.find(varnt => varnt.id === res.variant_id)
-      if (!v || !p) {
-        toast.error('Product variant not found')
-        return
-      }
-      if (v.current_stock <= 0) {
-        toast.error(`${p.name} (${v.name}) is out of stock!`)
-        return
-      }
-
-      const defW = formatDefaultWarranty(v.warranty_months)
-      const existing = cart.findIndex(i => i.variant.id === v.id && i.warranty_period === defW.period)
-      if (existing >= 0) {
-        const updated = [...cart]
-        updated[existing].quantity += 1
-        onUpdateCart(updated)
-      } else {
-        onUpdateCart([...cart, {
-          variant:         v,
-          product:         p,
-          quantity:        1,
-          unit_price:      Number(v.selling_price),
-          discount:        0,
-          warranty_period: defW.period,
-          warranty_months: defW.months,
-          serials:         [],
-        }])
-      }
-      toast.success(`Scanned & added: ${p.name} (${v.name})`)
+      toast.error(`No item found for barcode "${code}"`)
     } catch {
-      toast.error(`Barcode "${barcode}" not found`)
+      toast.error(`Barcode scan failed for "${code}"`)
     }
   }
 
-  const addToCart = () => {
+  // Add item from dropdown form
+  const addToCartFromDropdown = () => {
     if (!selectedVariant || !selectedProduct) return
-
     const defaultW = formatDefaultWarranty(selectedVariant.warranty_months)
     let wPeriod = defaultW.period
     let wMonths = defaultW.months
@@ -266,24 +762,7 @@ function StepCart({
       wMonths = preset ? preset.months : 0
     }
 
-    // Check if variant with same warranty already in cart
-    const existing = cart.findIndex(i => i.variant.id === selectedVariant.id && i.warranty_period === wPeriod)
-    if (existing >= 0) {
-      const updated = [...cart]
-      updated[existing].quantity += qty
-      onUpdateCart(updated)
-    } else {
-      onUpdateCart([...cart, {
-        variant:         selectedVariant,
-        product:         selectedProduct,
-        quantity:        qty,
-        unit_price:      Number(selectedVariant.selling_price),
-        discount:        0,
-        warranty_period: wPeriod,
-        warranty_months: wMonths,
-        serials:         [],
-      }])
-    }
+    addItemToCart(selectedVariant, selectedProduct, qty, undefined, wPeriod, wMonths)
     setSelectedProduct(null)
     setSelectedVariant(null)
     setWarrantyOption('DEFAULT')
@@ -299,7 +778,7 @@ function StepCart({
     if (q < 1) return
     const updated = [...cart]
     updated[idx].quantity = q
-    updated[idx].serials = []   // reset serials when qty changes
+    updated[idx].serials = []
     onUpdateCart(updated)
   }
 
@@ -317,112 +796,353 @@ function StepCart({
   }
 
   const total = cart.reduce((s, i) => s + i.quantity * i.unit_price, 0)
+  const totalInStockVariants = inStockCatalog.reduce((sum, p) => sum + p.variants.length, 0)
+
+  // Filter catalog
+  const filteredCatalog = inStockCatalog.filter(p => {
+    if (!catalogFilter.trim()) return true
+    const q = catalogFilter.toLowerCase()
+    return (
+      p.name.toLowerCase().includes(q) ||
+      (p.brand_name && p.brand_name.toLowerCase().includes(q)) ||
+      (p.category_name && p.category_name.toLowerCase().includes(q)) ||
+      p.variants.some(v =>
+        v.name.toLowerCase().includes(q) ||
+        (v.sku && v.sku.toLowerCase().includes(q)) ||
+        (v.barcode && v.barcode.toLowerCase().includes(q)) ||
+        v.available_serials.some(s => s.toLowerCase().includes(q))
+      )
+    )
+  })
 
   return (
     <div className="space-y-5">
-      {/* Add item */}
-      <div className="card space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="font-semibold text-gray-700 text-sm">Add Item</p>
-          <button
-            type="button"
-            onClick={() => setShowScanModal(true)}
-            className="px-3 py-1.5 rounded-lg border border-primary-200 bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
-          >
-            <ScanLine size={14} /> Scan Barcode (Camera / iVCam)
-          </button>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      {/* Add item Card */}
+      <div className="card space-y-4">
+        {/* Header with Title & Action Buttons */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
           <div>
-            <label className="label">Product</label>
-            <select
-              className="input"
-              value={selectedProduct?.id ?? ''}
-              onChange={e => {
-                const p = products.find(x => x.id === Number(e.target.value)) ?? null
-                setSelectedProduct(p)
-                setSelectedVariant(null)
-                setWarrantyOption('DEFAULT')
-                setCustomWarranty('')
-              }}
-            >
-              <option value="">— Select Product —</option>
-              {products.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.brand_name ? `${p.brand_name} — ` : ''}{p.name}
-                </option>
-              ))}
-            </select>
+            <p className="font-semibold text-gray-800 text-sm">Add Products to Sale</p>
+            <p className="text-xs text-gray-400">Type serial/barcode, pick from in-stock list, or scan with camera/photo</p>
           </div>
-
-          <div>
-            <label className="label">Variant</label>
-            <select
-              className="input"
-              disabled={!selectedProduct}
-              value={selectedVariant?.id ?? ''}
-              onChange={e => {
-                const v = selectedProduct?.variants?.find(x => x.id === Number(e.target.value)) ?? null
-                setSelectedVariant(v)
-                setWarrantyOption('DEFAULT')
-                setCustomWarranty('')
-              }}
-            >
-              <option value="">— Select Variant —</option>
-              {selectedProduct?.variants?.filter(v => v.is_active).map(v => (
-                <option key={v.id} value={v.id} disabled={v.current_stock <= 0}>
-                  {v.name} — {v.current_stock <= 0 ? 'Stock Out' : `${v.current_stock} in stock`} — {formatCurrency(v.selling_price)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="label flex items-center gap-1">
-              <Shield size={12} className="text-primary-600" /> Warranty
-            </label>
-            <select
-              className="input"
-              disabled={!selectedVariant}
-              value={warrantyOption}
-              onChange={e => setWarrantyOption(e.target.value)}
-            >
-              <option value="DEFAULT">
-                Default ({selectedVariant ? formatDefaultWarranty(selectedVariant.warranty_months).period : 'from product'})
-              </option>
-              {WARRANTY_PRESETS.map(p => (
-                <option key={p.period} value={p.period}>{p.label}</option>
-              ))}
-              <option value="CUSTOM">Custom Warranty…</option>
-            </select>
-            {warrantyOption === 'CUSTOM' && (
-              <input
-                type="text"
-                className="input mt-1.5 text-xs py-1"
-                placeholder="e.g. 18 Months Official"
-                value={customWarranty}
-                onChange={e => setCustomWarranty(e.target.value)}
-              />
-            )}
-          </div>
-
-          <div>
-            <label className="label">Qty</label>
-            <input
-              type="number" min={1} className="input" value={qty}
-              onChange={e => setQty(Math.max(1, Number(e.target.value)))}
-            />
-          </div>
-
-          <div className="flex items-end">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Live Camera Scanner */}
             <button
               type="button"
-              className="btn-primary w-full flex items-center justify-center gap-2"
-              disabled={!selectedVariant}
-              onClick={addToCart}
+              onClick={() => setShowScanModal(true)}
+              className="px-3 py-1.5 rounded-lg border border-primary-200 bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-medium flex items-center gap-1.5 transition-colors shadow-sm"
+              title="Scan live barcode with webcam or iVCam"
             >
-              <Plus size={15} /> Add
+              <ScanLine size={14} /> Scan Barcode (Camera / iVCam)
             </button>
+
+            {/* Photo / Picture Upload & OCR */}
+            <button
+              type="button"
+              onClick={() => setShowPhotoModal(true)}
+              className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-medium flex items-center gap-1.5 transition-colors shadow-sm"
+              title="Upload or take a photo of serial number or barcode"
+            >
+              <Camera size={14} /> Photo / Picture Scan
+            </button>
+
+            {/* In-Stock Catalog Accordion Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowCatalog(!showCatalog)}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors shadow-sm ${
+                showCatalog
+                  ? 'border-emerald-400 bg-emerald-600 text-white'
+                  : 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+              }`}
+              title="View products currently in stock and their serial numbers"
+            >
+              <Layers size={14} /> In-Stock Products & Serials ({totalInStockVariants})
+              {showCatalog ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+          </div>
+        </div>
+
+        {/* ─── Mode 1: Quick Type / Search Bar ─── */}
+        <div className="relative">
+          <div className="relative">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              className="input pl-10 pr-10 text-sm w-full py-2.5 bg-gray-50/50 hover:bg-white focus:bg-white transition-colors border-gray-300 focus:border-primary-500 rounded-xl"
+              placeholder="Type or paste Serial # (e.g. 260918-0011), Barcode, SKU, or Name... (Press Enter to add)"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true) }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (searchResults.length > 0) {
+                    handleSelectSearchResult(searchResults[0])
+                  }
+                }
+              }}
+            />
+            {isSearching ? (
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
+                <Loader2 size={16} className="animate-spin text-primary-500" />
+              </div>
+            ) : searchQuery ? (
+              <button
+                type="button"
+                onClick={() => { setSearchQuery(''); setSearchResults([]); setShowSearchDropdown(false) }}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={15} />
+              </button>
+            ) : null}
+          </div>
+
+          {/* Quick Search Suggestions Dropdown */}
+          {showSearchDropdown && searchResults.length > 0 && (
+            <div className="absolute z-20 top-full mt-1.5 left-0 right-0 bg-white rounded-xl shadow-xl border border-gray-200 divide-y divide-gray-100 max-h-80 overflow-y-auto">
+              {searchResults.map((res, idx) => (
+                <div
+                  key={`${res.variant_id}-${res.matched_serial ?? idx}`}
+                  onClick={() => handleSelectSearchResult(res)}
+                  className="p-3 hover:bg-primary-50/60 cursor-pointer flex items-center justify-between transition-colors text-left"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-900 text-sm">{res.product_name}</span>
+                      <span className="text-xs text-gray-500 font-medium">{res.variant_name}</span>
+                      {res.match_type === 'serial' && res.matched_serial && (
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono text-xs font-bold flex items-center gap-1">
+                          <Hash size={11} /> {res.matched_serial}
+                        </span>
+                      )}
+                      {res.match_type === 'barcode' && res.barcode && (
+                        <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded font-mono text-xs">
+                          Barcode: {res.barcode}
+                        </span>
+                      )}
+                      {res.match_type === 'sku' && res.sku && (
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-mono text-xs">
+                          SKU: {res.sku}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400">
+                      Warranty: {formatDefaultWarranty(res.warranty_months).period}
+                      {res.is_serialized ? ' · Serialized Item' : ''}
+                    </p>
+                  </div>
+                  <div className="text-right pl-3 shrink-0">
+                    <p className="font-bold text-gray-900 text-sm">৳{res.selling_price.toLocaleString()}</p>
+                    <span className="inline-block text-[11px] font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                      {res.current_stock} in stock
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ─── Mode 2: In-Stock Products & Serials Accordion ─── */}
+        {showCatalog && (
+          <div className="border border-emerald-200 bg-gradient-to-b from-emerald-50/50 to-white rounded-xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-100 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Layers size={16} className="text-emerald-600" />
+                <span className="font-bold text-gray-800 text-sm">In-Stock Catalog & Available Serials</span>
+                <span className="text-xs bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded-full">
+                  {totalInStockVariants} items available
+                </span>
+              </div>
+              <div className="relative w-64">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Filter in-stock list or serial…"
+                  value={catalogFilter}
+                  onChange={e => setCatalogFilter(e.target.value)}
+                  className="input pl-8 py-1 text-xs w-full bg-white"
+                />
+              </div>
+            </div>
+
+            {filteredCatalog.length === 0 ? (
+              <p className="text-center text-xs text-gray-400 py-6">No in-stock items match your filter.</p>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                {filteredCatalog.map(prod => (
+                  <div key={prod.id} className="p-3 bg-white rounded-lg border border-gray-200 shadow-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-gray-900 text-sm">{prod.name}</span>
+                        {prod.brand_name && <span className="text-xs text-gray-400 ml-1.5">({prod.brand_name})</span>}
+                        {prod.category_name && (
+                          <span className="text-[11px] ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">
+                            {prod.category_name}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-500 font-medium">
+                        Total Stock: <strong className="text-gray-900">{prod.total_stock}</strong>
+                      </span>
+                    </div>
+
+                    <div className="divide-y divide-gray-100">
+                      {prod.variants.map(v => (
+                        <div key={v.id} className="pt-2 first:pt-0 space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-gray-800">{v.name}</span>
+                              {v.sku && <span className="text-gray-400 font-mono text-[11px]">SKU: {v.sku}</span>}
+                              <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                {v.current_stock} in stock
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="font-bold text-gray-900">৳{v.selling_price.toLocaleString()}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleAddFromCatalog(prod, v)}
+                                className="px-2.5 py-1 bg-primary-600 hover:bg-primary-700 text-white rounded text-xs font-medium flex items-center gap-1 transition-colors"
+                              >
+                                <Plus size={13} /> Add
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Clickable In-Stock Serial Badges */}
+                          {prod.is_serialized && v.available_serials.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                              <span className="text-[11px] text-gray-500 font-medium flex items-center gap-0.5 mr-1">
+                                <Hash size={11} className="text-blue-500" /> Click to add serial:
+                              </span>
+                              {v.available_serials.map(sn => {
+                                const isAlreadyInCart = cart.some(ci => ci.serials.includes(sn))
+                                return (
+                                  <button
+                                    key={sn}
+                                    type="button"
+                                    disabled={isAlreadyInCart}
+                                    onClick={() => handleAddFromCatalog(prod, v, sn)}
+                                    className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium transition-all ${
+                                      isAlreadyInCart
+                                        ? 'bg-gray-100 text-gray-400 line-through cursor-not-allowed border border-gray-200'
+                                        : 'bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-200 active:scale-95 shadow-sm'
+                                    }`}
+                                    title={isAlreadyInCart ? 'Already added to cart' : `Click to add ${prod.name} with serial #${sn}`}
+                                  >
+                                    #{sn}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Mode 3: Standard Dropdown Selector ─── */}
+        <div className="pt-1">
+          <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Or Select Manually:</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <div>
+              <label className="label">Product</label>
+              <select
+                className="input"
+                value={selectedProduct?.id ?? ''}
+                onChange={e => {
+                  const p = products.find(x => x.id === Number(e.target.value)) ?? null
+                  setSelectedProduct(p)
+                  setSelectedVariant(null)
+                  setWarrantyOption('DEFAULT')
+                  setCustomWarranty('')
+                }}
+              >
+                <option value="">— Select Product —</option>
+                {products.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name ? `${p.brand_name} — ` : ''}{p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label">Variant</label>
+              <select
+                className="input"
+                disabled={!selectedProduct}
+                value={selectedVariant?.id ?? ''}
+                onChange={e => {
+                  const v = selectedProduct?.variants?.find(x => x.id === Number(e.target.value)) ?? null
+                  setSelectedVariant(v)
+                  setWarrantyOption('DEFAULT')
+                  setCustomWarranty('')
+                }}
+              >
+                <option value="">— Select Variant —</option>
+                {selectedProduct?.variants?.filter(v => v.is_active).map(v => (
+                  <option key={v.id} value={v.id} disabled={v.current_stock <= 0}>
+                    {v.name} — {v.current_stock <= 0 ? 'Stock Out' : `${v.current_stock} in stock`} — {formatCurrency(v.selling_price)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label flex items-center gap-1">
+                <Shield size={12} className="text-primary-600" /> Warranty
+              </label>
+              <select
+                className="input"
+                disabled={!selectedVariant}
+                value={warrantyOption}
+                onChange={e => setWarrantyOption(e.target.value)}
+              >
+                <option value="DEFAULT">
+                  Default ({selectedVariant ? formatDefaultWarranty(selectedVariant.warranty_months).period : 'from product'})
+                </option>
+                {WARRANTY_PRESETS.map(p => (
+                  <option key={p.period} value={p.period}>{p.label}</option>
+                ))}
+                <option value="CUSTOM">Custom Warranty…</option>
+              </select>
+              {warrantyOption === 'CUSTOM' && (
+                <input
+                  type="text"
+                  className="input mt-1.5 text-xs py-1"
+                  placeholder="e.g. 18 Months Official"
+                  value={customWarranty}
+                  onChange={e => setCustomWarranty(e.target.value)}
+                />
+              )}
+            </div>
+
+            <div>
+              <label className="label">Qty</label>
+              <input
+                type="number" min={1} className="input" value={qty}
+                onChange={e => setQty(Math.max(1, Number(e.target.value)))}
+              />
+            </div>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                className="btn-primary w-full flex items-center justify-center gap-2 py-2"
+                disabled={!selectedVariant}
+                onClick={addToCartFromDropdown}
+              >
+                <Plus size={15} /> Add
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -453,7 +1173,14 @@ function StepCart({
                     <p className="font-medium text-gray-900">{item.product.name}</p>
                     <p className="text-xs text-gray-400">{item.variant.name} {item.variant.sku ? `· ${item.variant.sku}` : ''}</p>
                     {item.product.is_serialized && (
-                      <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Serialized</span>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[11px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-medium">Serialized</span>
+                        {item.serials.filter(Boolean).map(sn => (
+                          <span key={sn} className="text-[11px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-mono font-bold">
+                            #{sn}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </td>
                   <td className="px-3 py-3">
@@ -535,7 +1262,7 @@ function StepCart({
         </button>
       </div>
 
-      {/* Barcode Scanner Modal for POS */}
+      {/* Barcode Scanner Modal for POS (Camera / iVCam) */}
       <Modal
         isOpen={showScanModal}
         onClose={() => setShowScanModal(false)}
@@ -558,6 +1285,13 @@ function StepCart({
           </div>
         </div>
       </Modal>
+
+      {/* Photo / Picture Scan Modal (Upload / Snap Photo) */}
+      <PhotoScanModal
+        isOpen={showPhotoModal}
+        onClose={() => setShowPhotoModal(false)}
+        onAddMatch={handleSelectSearchResult}
+      />
     </div>
   )
 }
@@ -638,7 +1372,9 @@ function StepSerials({
   useEffect(() => {
     cart.forEach((item, idx) => {
       if (item.product.is_serialized && item.serials.length !== item.quantity) {
-        onUpdateSerials(idx, Array(item.quantity).fill(''))
+        const current = [...(item.serials || [])]
+        while (current.length < item.quantity) current.push('')
+        onUpdateSerials(idx, current.slice(0, item.quantity))
       }
     })
   }, [])

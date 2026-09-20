@@ -179,3 +179,52 @@ class PaginatedProducts(BaseModel):
     page: int
     per_page: int
     pages: int
+
+
+# ─── POS Quick Lookup & In-Stock Catalog ──────────────────────────────────────
+
+class InStockVariantItem(BaseModel):
+    id: int
+    product_id: int
+    name: str
+    sku: Optional[str] = None
+    barcode: Optional[str] = None
+    selling_price: float
+    cost_price: float
+    warranty_months: int = 0
+    current_stock: int = 0
+    available_serials: list[str] = []
+
+
+class InStockProductItem(BaseModel):
+    id: int
+    name: str
+    brand_name: Optional[str] = None
+    category_name: Optional[str] = None
+    is_serialized: bool = False
+    total_stock: int = 0
+    variants: list[InStockVariantItem] = []
+
+
+class QuickLookupResult(BaseModel):
+    match_type: str  # 'serial' | 'barcode' | 'sku' | 'name'
+    matched_serial: Optional[str] = None
+    product_id: int
+    product_name: str
+    is_serialized: bool
+    variant_id: int
+    variant_name: str
+    sku: Optional[str] = None
+    barcode: Optional[str] = None
+    selling_price: float
+    current_stock: int
+    warranty_months: int = 0
+    available_serials: list[str] = []
+
+
+class ScanImageResponse(BaseModel):
+    found: bool
+    raw_text: str = ""
+    detected_code: Optional[str] = None
+    match: Optional[QuickLookupResult] = None
+    message: Optional[str] = None

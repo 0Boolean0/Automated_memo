@@ -33,3 +33,6 @@ apscheduler==3.10.4
 
 # Date utilities
 python-dateutil==2.9.0
+
+# OCR (Windows Native)
+winocr>=0.0.15
