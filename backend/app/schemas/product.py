@@ -239,3 +239,36 @@ class ExtractedLabelData(BaseModel):
     all_candidates: list[str] = []
     lines: list[str] = []
     message: Optional[str] = None
+
+
+class SerialNumberResponse(BaseModel):
+    id: int
+    business_id: int
+    variant_id: int
+    serial: str
+    status: str
+    cost_price: Optional[Decimal] = None
+    notes: Optional[str] = None
+    received_at: Optional[datetime] = None
+    sold_at: Optional[datetime] = None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class SerialNumberUpdate(BaseModel):
+    serial: str
+    notes: Optional[str] = None
+
+
+class AddSerialsPayload(BaseModel):
+    serials: list[str]
+
+
+class ClearStockPayload(BaseModel):
+    reason: Optional[str] = "Manual stock clearance"
+
+
+class ClearStockResponse(BaseModel):
+    message: str
+    cleared_units: int
+

@@ -156,6 +156,20 @@ export interface ExtractedLabelData {
   message?: string | null
 }
 
+export interface SerialNumberItem {
+  id: number
+  business_id: number
+  variant_id: number
+  serial: string
+  status: string
+  cost_price: number | null
+  notes: string | null
+  received_at: string | null
+  sold_at: string | null
+  created_at: string
+}
+
+
 export interface ProductListParams {
   search?: string
   category_id?: number
@@ -289,4 +303,28 @@ export const productService = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },
+
+  /** Get all serial numbers for a variant. */
+  getVariantSerials: (variantId: number) =>
+    api.get<SerialNumberItem[]>(`/products/variants/${variantId}/serials`).then(r => r.data),
+
+  /** Update a serial number code or notes. */
+  updateSerialNumber: (serialId: number, payload: { serial: string; notes?: string }) =>
+    api.put<SerialNumberItem>(`/products/serials/${serialId}`, payload).then(r => r.data),
+
+  /** Add new serial numbers to an existing variant. */
+  addSerialsToVariant: (variantId: number, serials: string[]) =>
+    api.post<SerialNumberItem[]>(`/products/variants/${variantId}/serials`, { serials }).then(r => r.data),
+
+  /** Delete a serial number. */
+  deleteSerialNumber: (serialId: number) =>
+    api.delete(`/products/serials/${serialId}`).then(r => r.data),
+
+  /** Clear stock for all variants of a product to 0. */
+  clearProductStock: (productId: number, reason?: string) =>
+    api.post<{ message: string; cleared_units: number }>(`/products/${productId}/clear-stock`, { reason }).then(r => r.data),
+
+  /** Clear stock for a single variant to 0. */
+  clearVariantStock: (variantId: number, reason?: string) =>
+    api.post<{ message: string; cleared_units: number }>(`/products/variants/${variantId}/clear-stock`, { reason }).then(r => r.data),
 }

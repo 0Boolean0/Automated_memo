@@ -957,9 +957,20 @@ def extract_label_codes_from_image(image_bytes: bytes) -> dict:
     if bc_match:
         barcode = bc_match.group(1).strip()
     else:
-        num_matches = re.findall(r'\b(?:\d{12,14}|\d{8})\b', raw_text)
-        if num_matches:
-            barcode = num_matches[0]
+        # Also check for barcode numbers that have spaces between digit groups, e.g. "6 950589 916671"
+        spaced_matches = re.findall(r'\b(?:\d[\s\t]+\d{5,7}[\s\t]+\d{5,7}|\d{1,3}[\s\t]+\d{4,6}[\s\t]+\d{4,6})\b', raw_text)
+        if spaced_matches:
+            cand = re.sub(r'\s+', '', spaced_matches[0])
+            if len(cand) in (8, 12, 13, 14):
+                barcode = cand
+        if not barcode:
+            num_matches = re.findall(r'\b(?:\d{12,14}|\d{8})\b', raw_text)
+            if num_matches:
+                barcode = num_matches[0]
+
+    # Clean any internal spaces in detected barcode
+    if barcode:
+        barcode = re.sub(r'\s+', '', barcode)
 
     # 3. SKU / Model extraction
     sku = None
@@ -990,4 +1001,226 @@ def extract_label_codes_from_image(image_bytes: bytes) -> dict:
         "lines": lines[:15],
         "message": message,
     }
+
+
+# ─── Serial Number Management ────────────────────────────────────────────────
+
+def get_variant_serials(db: Session, variant_id: int, business_id: int) -> list[SerialNumber]:
+    """Get all serial numbers for a variant."""
+    variant = _get_variant(db, variant_id, business_id)
+    return (
+        db.query(SerialNumber)
+        .filter(SerialNumber.variant_id == variant.id, SerialNumber.business_id == business_id)
+        .order_by(SerialNumber.id.desc())
+        .all()
+    )
+
+
+def update_serial_number(
+    db: Session,
+    serial_id: int,
+    business_id: int,
+    new_serial: str,
+    notes: str | None = None,
+) -> SerialNumber:
+    """Update a serial number (e.g. correct typo or update code)."""
+    sn = db.query(SerialNumber).filter(
+        SerialNumber.id == serial_id,
+        SerialNumber.business_id == business_id,
+    ).first()
+    if not sn:
+        raise HTTPException(status_code=404, detail="Serial number not found")
+
+    cleaned = new_serial.strip()
+    if not cleaned:
+        raise HTTPException(status_code=422, detail="Serial number cannot be empty")
+
+    if cleaned != sn.serial:
+        # Check uniqueness within business
+        existing = db.query(SerialNumber).filter(
+            SerialNumber.business_id == business_id,
+            SerialNumber.serial == cleaned,
+            SerialNumber.id != sn.id,
+        ).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Serial number '{cleaned}' already exists")
+        sn.serial = cleaned
+
+    if notes is not None:
+        sn.notes = notes
+
+    db.commit()
+    db.refresh(sn)
+    return sn
+
+
+def add_serials_to_variant(
+    db: Session,
+    variant_id: int,
+    business_id: int,
+    user_id: int,
+    serials: list[str],
+) -> list[SerialNumber]:
+    """Add new serial numbers to an existing serialized variant."""
+    variant = _get_variant(db, variant_id, business_id)
+    product = variant.product
+    if not product.is_serialized:
+        raise HTTPException(status_code=400, detail="Cannot add serial numbers to a non-serialized product")
+
+    cleaned_serials = [s.strip() for s in serials if s and s.strip()]
+    if not cleaned_serials:
+        raise HTTPException(status_code=422, detail="No valid serial numbers provided")
+
+    # Check for duplicates within incoming list
+    if len(cleaned_serials) != len(set(cleaned_serials)):
+        raise HTTPException(status_code=409, detail="Duplicate serial numbers in request")
+
+    # Check database for existing
+    for s_val in cleaned_serials:
+        existing = db.query(SerialNumber).filter(
+            SerialNumber.business_id == business_id,
+            SerialNumber.serial == s_val,
+        ).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Serial number '{s_val}' already exists")
+
+    now = datetime.now(timezone.utc)
+    created_list = []
+    for s_val in cleaned_serials:
+        sn = SerialNumber(
+            business_id=business_id,
+            variant_id=variant.id,
+            serial=s_val,
+            status="IN_STOCK",
+            cost_price=variant.cost_price,
+            received_at=now,
+            notes="Added via serial manager",
+        )
+        db.add(sn)
+        created_list.append(sn)
+
+    # Increase stock
+    variant.current_stock += len(cleaned_serials)
+
+    # Record inventory adjustment
+    adj = InventoryAdjustment(
+        business_id=business_id,
+        variant_id=variant.id,
+        adjustment_type=AdjustmentType.CORRECTION,
+        quantity_change=len(cleaned_serials),
+        reason=f"Added {len(cleaned_serials)} serial number(s)",
+        adjusted_by=user_id,
+    )
+    db.add(adj)
+
+    db.commit()
+    for sn in created_list:
+        db.refresh(sn)
+    return created_list
+
+
+def delete_serial_number(
+    db: Session,
+    serial_id: int,
+    business_id: int,
+    user_id: int,
+) -> None:
+    """Delete an unsold serial number and decrement stock if IN_STOCK."""
+    sn = db.query(SerialNumber).filter(
+        SerialNumber.id == serial_id,
+        SerialNumber.business_id == business_id,
+    ).first()
+    if not sn:
+        raise HTTPException(status_code=404, detail="Serial number not found")
+
+    if sn.status == "SOLD":
+        raise HTTPException(status_code=400, detail="Cannot delete a sold serial number")
+
+    variant = sn.variant
+    # If it was IN_STOCK, decrement stock
+    if sn.status == "IN_STOCK" and variant:
+        variant.current_stock = max(0, variant.current_stock - 1)
+        adj = InventoryAdjustment(
+            business_id=business_id,
+            variant_id=variant.id,
+            adjustment_type=AdjustmentType.PHYSICAL_COUNT,
+            quantity_change=-1,
+            reason=f"Deleted serial {sn.serial}",
+            adjusted_by=user_id,
+        )
+        db.add(adj)
+
+    db.delete(sn)
+    db.commit()
+
+
+# ─── Clear Stock ─────────────────────────────────────────────────────────────
+
+def clear_variant_stock(
+    db: Session,
+    variant_id: int,
+    business_id: int,
+    user_id: int,
+    reason: str = "Manual stock clearance",
+) -> int:
+    """Reset stock for a single variant to 0, clearing in-stock serials if serialized."""
+    variant = _get_variant(db, variant_id, business_id)
+    product = variant.product
+    old_stock = variant.current_stock
+
+    if old_stock <= 0:
+        return 0
+
+    if product.is_serialized:
+        in_stock_serials = (
+            db.query(SerialNumber)
+            .filter(
+                SerialNumber.variant_id == variant.id,
+                SerialNumber.business_id == business_id,
+                SerialNumber.status == "IN_STOCK",
+            )
+            .all()
+        )
+        for sn in in_stock_serials:
+            # If not linked to purchase or sale, delete it so the serial number is free to reuse
+            if not sn.purchase_item_id and not sn.sale_item_id:
+                db.delete(sn)
+            else:
+                sn.status = "CANCELLED"
+                sn.serial = f"{sn.serial}__cleared_{sn.id}"
+
+    variant.current_stock = 0
+
+    adj = InventoryAdjustment(
+        business_id=business_id,
+        variant_id=variant.id,
+        adjustment_type=AdjustmentType.PHYSICAL_COUNT,
+        quantity_change=-old_stock,
+        reason=reason or "Manual stock clearance",
+        adjusted_by=user_id,
+    )
+    db.add(adj)
+    db.commit()
+    return old_stock
+
+
+def clear_product_stock(
+    db: Session,
+    product_id: int,
+    business_id: int,
+    user_id: int,
+    reason: str = "Manual stock clearance",
+) -> int:
+    """Reset stock for all variants of a product to 0."""
+    product = get_product(db, product_id, business_id)
+    total_cleared = 0
+
+    for variant in product.variants:
+        if not variant.is_active:
+            continue
+        cleared = clear_variant_stock(db, variant.id, business_id, user_id, reason=reason)
+        total_cleared += cleared
+
+    return total_cleared
+
 

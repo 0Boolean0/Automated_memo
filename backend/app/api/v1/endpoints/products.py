@@ -24,6 +24,8 @@ from app.schemas.product import (
     VariantCreate, VariantUpdate, VariantResponse,
     PriceHistoryResponse, InStockProductItem,
     QuickLookupResult, ScanImageResponse, ExtractedLabelData,
+    SerialNumberResponse, SerialNumberUpdate, AddSerialsPayload,
+    ClearStockPayload, ClearStockResponse,
 )
 from app.services import product_service
 
@@ -212,4 +214,87 @@ def get_in_stock_serials(
         SerialNumber.status == "IN_STOCK",
     ).order_by(SerialNumber.id.asc()).all()
     return [s[0] for s in serials]
+
+
+@router.get("/variants/{variant_id}/serials", response_model=list[SerialNumberResponse])
+def get_variant_serials(
+    variant_id: int,
+    current_user: User = Depends(require_permission("view_products")),
+    db: Session = Depends(get_db),
+):
+    """List all serial numbers for a variant."""
+    return product_service.get_variant_serials(db, variant_id, current_user.business_id)
+
+
+@router.put("/serials/{serial_id}", response_model=SerialNumberResponse)
+def update_serial_number(
+    serial_id: int,
+    data: SerialNumberUpdate,
+    current_user: User = Depends(require_permission("edit_product")),
+    db: Session = Depends(get_db),
+):
+    """Update a serial number string or notes."""
+    return product_service.update_serial_number(
+        db, serial_id, current_user.business_id, data.serial, data.notes
+    )
+
+
+@router.post("/variants/{variant_id}/serials", response_model=list[SerialNumberResponse], status_code=201)
+def add_serials_to_variant(
+    variant_id: int,
+    data: AddSerialsPayload,
+    current_user: User = Depends(require_permission("edit_product")),
+    db: Session = Depends(get_db),
+):
+    """Add new serial numbers to a variant and increase current stock."""
+    return product_service.add_serials_to_variant(
+        db, variant_id, current_user.business_id, current_user.id, data.serials
+    )
+
+
+@router.delete("/serials/{serial_id}", status_code=204)
+def delete_serial_number(
+    serial_id: int,
+    current_user: User = Depends(require_permission("edit_product")),
+    db: Session = Depends(get_db),
+):
+    """Delete an unsold serial number (decrements stock if in stock)."""
+    product_service.delete_serial_number(
+        db, serial_id, current_user.business_id, current_user.id
+    )
+
+
+@router.post("/{product_id}/clear-stock", response_model=ClearStockResponse)
+def clear_product_stock(
+    product_id: int,
+    data: ClearStockPayload = ClearStockPayload(),
+    current_user: User = Depends(require_permission("adjust_inventory")),
+    db: Session = Depends(get_db),
+):
+    """Clear all stock across all variants of a product to 0."""
+    cleared = product_service.clear_product_stock(
+        db, product_id, current_user.business_id, current_user.id, reason=data.reason or "Manual stock clearance"
+    )
+    return ClearStockResponse(
+        message=f"Successfully cleared {cleared} units of stock.",
+        cleared_units=cleared,
+    )
+
+
+@router.post("/variants/{variant_id}/clear-stock", response_model=ClearStockResponse)
+def clear_variant_stock(
+    variant_id: int,
+    data: ClearStockPayload = ClearStockPayload(),
+    current_user: User = Depends(require_permission("adjust_inventory")),
+    db: Session = Depends(get_db),
+):
+    """Clear all stock for a single variant to 0."""
+    cleared = product_service.clear_variant_stock(
+        db, variant_id, current_user.business_id, current_user.id, reason=data.reason or "Manual stock clearance"
+    )
+    return ClearStockResponse(
+        message=f"Successfully cleared {cleared} units of stock for this variant.",
+        cleared_units=cleared,
+    )
+
 

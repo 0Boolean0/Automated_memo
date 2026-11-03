@@ -268,16 +268,35 @@ export default function StockAdjustmentModal({ isOpen, onClose, onAdjusted, onSa
 
           {/* Current stock info */}
           {selectedVariant && (
-            <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
-              <p className="text-xs text-blue-700">
-                <span className="font-semibold">Current Stock:</span> {selectedVariant.current_stock} units
-              </p>
-              <p className="text-xs text-blue-700 mt-1">
-                <span className="font-semibold">After Adjustment:</span>{' '}
-                <span className={selectedVariant.current_stock + (quantityChange || 0) < 0 ? 'text-red-600 font-bold' : ''}>
-                  {selectedVariant.current_stock + (quantityChange || 0)} units
-                </span>
-              </p>
+            <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-blue-700">
+                  <span className="font-semibold">Current Stock:</span> {selectedVariant.current_stock} units
+                </p>
+                <p className="text-xs text-blue-700 mt-0.5">
+                  <span className="font-semibold">After Adjustment:</span>{' '}
+                  <span className={selectedVariant.current_stock + (quantityChange || 0) < 0 ? 'text-red-600 font-bold' : ''}>
+                    {selectedVariant.current_stock + (quantityChange || 0)} units
+                  </span>
+                </p>
+              </div>
+              {selectedVariant.current_stock > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    reset({
+                      ...watch(),
+                      adjustment_type: 'PHYSICAL_COUNT',
+                      quantity_change: -selectedVariant.current_stock,
+                      reason: 'Manual stock clearance to 0',
+                    })
+                  }}
+                  className="text-xs px-2.5 py-1 rounded-md bg-red-100 text-red-700 hover:bg-red-200 transition-colors font-medium border border-red-200"
+                  title="Quickly set adjustment to clear all stock to 0"
+                >
+                  Quick Clear Stock (to 0)
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -77,28 +77,51 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
   // Per-variant manual serial input text state
   const [serialInputs, setSerialInputs] = useState<Record<number, string>>({})
 
+  // Track original serials when editing existing product
+  const [origSerials, setOrigSerials] = useState<Record<number, string[]>>({})
+
   // Populate form when editing
   useEffect(() => {
     if (editProduct) {
-      reset({
-        name:          editProduct.name,
-        description:   editProduct.description ?? '',
-        brand_id:      editProduct.brand_id ?? undefined,
-        category_id:   editProduct.category_id ?? undefined,
-        is_serialized: editProduct.is_serialized ? 'true' as any : 'false' as any,
-        variants:      editProduct.variants.map(v => ({
-          name:            v.name,
-          sku:             v.sku ?? '',
-          barcode:         v.barcode ?? '',
-          cost_price:      Number(v.cost_price),
-          selling_price:   Number(v.selling_price),
-          warranty_months: v.warranty_months,
-          reorder_level:   v.reorder_level,
-          initial_stock:   v.current_stock,
-          initial_serials: [],
-        })),
-      })
+      const loadExisting = async () => {
+        const origMap: Record<number, string[]> = {}
+        const variantsData = await Promise.all(
+          editProduct.variants.map(async (v, idx) => {
+            let serials: string[] = []
+            if (editProduct.is_serialized) {
+              try {
+                serials = await productService.getInStockSerials(v.id)
+              } catch {
+                serials = []
+              }
+            }
+            origMap[idx] = [...serials]
+            return {
+              name:            v.name,
+              sku:             v.sku ?? '',
+              barcode:         v.barcode ?? '',
+              cost_price:      Number(v.cost_price),
+              selling_price:   Number(v.selling_price),
+              warranty_months: v.warranty_months,
+              reorder_level:   v.reorder_level,
+              initial_stock:   v.current_stock,
+              initial_serials: serials,
+            }
+          })
+        )
+        setOrigSerials(origMap)
+        reset({
+          name:          editProduct.name,
+          description:   editProduct.description ?? '',
+          brand_id:      editProduct.brand_id ?? undefined,
+          category_id:   editProduct.category_id ?? undefined,
+          is_serialized: editProduct.is_serialized ? 'true' as any : 'false' as any,
+          variants:      variantsData,
+        })
+      }
+      loadExisting()
     } else {
+      setOrigSerials({})
       reset({
         is_serialized: 'true' as any,
         variants: [{ name: 'Standard', sku: '', barcode: '', cost_price: 0, selling_price: 0, warranty_months: 12, reorder_level: 5, initial_stock: 0, initial_serials: [] }],
@@ -176,10 +199,19 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
         for (let i = 0; i < data.variants.length; i++) {
           const vData = data.variants[i]
           if (editProduct.variants[i]) {
-            await productService.updateVariant(editProduct.variants[i].id, {
+            const vId = editProduct.variants[i].id
+            await productService.updateVariant(vId, {
               ...vData,
               current_stock: vData.initial_stock,
             })
+            // If serialized and new serials were added in edit mode
+            if (editProduct.is_serialized && vData.initial_serials) {
+              const previousSerials = origSerials[i] || []
+              const newlyAdded = vData.initial_serials.filter(s => !previousSerials.includes(s))
+              if (newlyAdded.length > 0) {
+                await productService.addSerialsToVariant(vId, newlyAdded)
+              }
+            }
           } else {
             await productService.addVariant(editProduct.id, {
               ...vData,
@@ -190,7 +222,7 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
             })
           }
         }
-        toast.success('Product updated')
+        toast.success('Product and serials updated')
       } else {
         await productService.create({
           name:          data.name,
@@ -394,21 +426,30 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
                       />
                     </div>
 
-                    {/* Initial Serial Numbers section for Serialized products */}
-                    {watch('is_serialized') && !isEdit && (
-                      <div className="col-span-2 p-3 bg-white border border-gray-200 rounded-lg space-y-2 shadow-2xs">
+                    {/* 2-Segment Serialized Presentation */}
+                    {/* Segment 1: Barcode & SKU Header note */}
+                    <div className="col-span-2 pt-2 border-t border-gray-200">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-800">
+                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">1</span>
+                        <span>Segment 1: Product Identifiers (SKU & Barcode above)</span>
+                      </div>
+                    </div>
+
+                    {/* Segment 2: Serial Numbers */}
+                    {watch('is_serialized') && (
+                      <div className="col-span-2 p-3 bg-white border border-purple-200 rounded-lg space-y-2 shadow-2xs">
                         <div className="flex items-center justify-between">
-                          <label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
-                            <Hash size={13} className="text-primary-600" />
-                            Initial Serial Numbers
-                            <span className="text-xs font-normal text-gray-400">
-                              ({((watch(`variants.${index}.initial_serials`) as string[]) || []).length} entered)
+                          <label className="text-xs font-semibold text-purple-900 flex items-center gap-1.5">
+                            <span className="w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center text-[10px]">2</span>
+                            <span>Segment 2: Serial Numbers (S/N)</span>
+                            <span className="text-xs font-normal text-gray-500">
+                              ({((watch(`variants.${index}.initial_serials`) as string[]) || []).length} registered)
                             </span>
                           </label>
                           <button
                             type="button"
                             onClick={() => openScanModal(index, 'serial')}
-                            className="text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
+                            className="text-xs text-purple-600 hover:text-purple-700 font-medium flex items-center gap-1"
                             title="Scan photo for serial numbers"
                           >
                             <Camera size={12} /> Scan Picture for Serials
@@ -421,13 +462,14 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
                             {((watch(`variants.${index}.initial_serials`) as string[]) || []).map((sn, sIdx) => (
                               <span
                                 key={sIdx}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono bg-primary-100 text-primary-800 border border-primary-200"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono bg-purple-100 text-purple-800 border border-purple-200"
                               >
                                 {sn}
                                 <button
                                   type="button"
                                   onClick={() => removeSerialFromVariant(index, sIdx)}
-                                  className="text-primary-600 hover:text-red-500 ml-0.5"
+                                  className="text-purple-600 hover:text-red-500 ml-0.5"
+                                  title="Remove serial"
                                 >
                                   <X size={12} />
                                 </button>
@@ -456,7 +498,7 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
                             onClick={() => addSerialToVariant(index)}
                             className="btn-secondary text-xs py-1.5 px-3 font-medium"
                           >
-                            + Add
+                            + Add Serial
                           </button>
                         </div>
                       </div>

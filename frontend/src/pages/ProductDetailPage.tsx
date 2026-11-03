@@ -8,13 +8,15 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Pencil, Loader2, Package, Barcode,
   TrendingUp, Shield, AlertTriangle, Plus, History,
-  SlidersHorizontal,
+  SlidersHorizontal, Trash2, Hash, Sparkles, Tag,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Badge from '@/components/ui/Badge'
 import Modal from '@/components/ui/Modal'
 import ProductFormModal from '@/components/products/ProductFormModal'
 import StockAdjustmentModal from '@/components/inventory/StockAdjustmentModal'
+import ClearStockModal from '@/components/inventory/ClearStockModal'
+import SerialManagerModal from '@/components/products/SerialManagerModal'
 import { productService, categoryService, brandService } from '@/services/productService'
 import type { Product, ProductVariant, PriceHistory, Category, Brand } from '@/services/productService'
 import { useAuthStore } from '@/services/authStore'
@@ -37,6 +39,14 @@ export default function ProductDetailPage() {
   const [historyVariant, setHistoryVariant] = useState<ProductVariant | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [brands, setBrands] = useState<Brand[]>([])
+
+  // Clear stock modal state
+  const [showClearModal, setShowClearModal] = useState(false)
+  const [clearTargetVariant, setClearTargetVariant] = useState<ProductVariant | null>(null)
+
+  // Serial manager modal state
+  const [showSerialModal, setShowSerialModal] = useState(false)
+  const [serialVariantId, setSerialVariantId] = useState<number | undefined>(undefined)
 
   const fetchProduct = async () => {
     if (!id) return
@@ -96,7 +106,18 @@ export default function ProductDetailPage() {
             {[product.brand_name, product.category_name].filter(Boolean).join(' · ') || 'No brand / category'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {product.is_serialized && (
+            <button
+              onClick={() => {
+                setSerialVariantId(activeVariants[0]?.id)
+                setShowSerialModal(true)
+              }}
+              className="btn-secondary flex items-center gap-2 text-purple-700 border-purple-200 hover:bg-purple-50 shadow-2xs"
+            >
+              <Barcode size={15} /> Serials & Barcode
+            </button>
+          )}
           {canAdjust && (
             <button
               onClick={() => {
@@ -106,6 +127,18 @@ export default function ProductDetailPage() {
               className="btn-secondary flex items-center gap-2"
             >
               <SlidersHorizontal size={15} /> Adjust Stock
+            </button>
+          )}
+          {canAdjust && (product.total_stock ?? 0) > 0 && (
+            <button
+              onClick={() => {
+                setClearTargetVariant(null)
+                setShowClearModal(true)
+              }}
+              className="btn-secondary flex items-center gap-2 text-red-700 border-red-200 hover:bg-red-50"
+              title="Clear all stock to 0"
+            >
+              <Trash2 size={15} /> Clear Stock
             </button>
           )}
           {canEdit && (
@@ -143,6 +176,74 @@ export default function ProductDetailPage() {
         ))}
       </div>
 
+      {/* ════════════════════════════════════════════════════════════════════
+          2-SEGMENT SERIALIZED PRODUCT OVERVIEW (If Serialized)
+          ════════════════════════════════════════════════════════════════════ */}
+      {product.is_serialized && (
+        <div className="card border-purple-200 bg-gradient-to-br from-purple-50/30 via-white to-blue-50/20 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center">
+                <Barcode size={18} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900">2-Segment Serialized Configuration</h3>
+                <p className="text-xs text-gray-500">
+                  Segment 1 = Product Barcode & SKU · Segment 2 = Individual Unit Serial Numbers (S/N)
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setSerialVariantId(activeVariants[0]?.id)
+                setShowSerialModal(true)
+              }}
+              className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 border-purple-200 text-purple-700 hover:bg-purple-50 font-medium"
+            >
+              <Pencil size={13} /> Manage / Edit Serials & Barcode
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            {/* Segment 1 Box */}
+            <div className="p-3.5 rounded-xl bg-blue-50/60 border border-blue-200 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] font-bold">1</span>
+                <span className="text-xs font-bold text-blue-900 uppercase tracking-wide">Segment 1: Barcode & SKU</span>
+              </div>
+              <div className="space-y-1 text-xs">
+                {activeVariants.map(v => (
+                  <div key={v.id} className="flex justify-between items-center py-1 border-b border-blue-100 last:border-none">
+                    <span className="text-gray-600">{v.name}:</span>
+                    <span className="font-mono text-gray-900 font-medium">
+                      {v.barcode ? `Barcode: ${v.barcode}` : 'No barcode'}
+                      {v.sku ? ` · SKU: ${v.sku}` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Segment 2 Box */}
+            <div className="p-3.5 rounded-xl bg-purple-50/60 border border-purple-200 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-600 text-white text-[11px] font-bold">2</span>
+                <span className="text-xs font-bold text-purple-900 uppercase tracking-wide">Segment 2: Serial Numbers</span>
+              </div>
+              <div className="flex items-center justify-between text-xs pt-1">
+                <span className="text-gray-600">Total in stock serials:</span>
+                <span className="font-bold text-purple-800 bg-purple-100 px-2.5 py-0.5 rounded-full">
+                  {product.total_stock ?? 0} units registered
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500">
+                You can edit, add, or scan serial numbers at any time using the Serial Manager.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Variants table */}
       <div className="card p-0 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -175,7 +276,7 @@ export default function ProductDetailPage() {
                 <tr key={v.id} className={`${v.is_active ? '' : 'opacity-50'}`}>
                   <td className="px-5 py-3.5">
                     <p className="font-medium text-gray-900">{v.name}</p>
-                    {v.barcode && <p className="text-xs text-gray-400">{v.barcode}</p>}
+                    {v.barcode && <p className="text-xs text-gray-400 font-mono">Barcode: {v.barcode}</p>}
                   </td>
                   <td className="px-5 py-3.5 text-gray-500 font-mono text-xs">{v.sku || '—'}</td>
                   <td className="px-5 py-3.5 text-gray-700">{formatCurrency(v.cost_price)}</td>
@@ -206,6 +307,18 @@ export default function ProductDetailPage() {
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-1 justify-end">
+                      {product.is_serialized && (
+                        <button
+                          onClick={() => {
+                            setSerialVariantId(v.id)
+                            setShowSerialModal(true)
+                          }}
+                          className="p-1.5 rounded text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors"
+                          title="Manage Barcode, SKU & Serials"
+                        >
+                          <Barcode size={14} />
+                        </button>
+                      )}
                       {canAdjust && (
                         <button
                           onClick={() => {
@@ -216,6 +329,18 @@ export default function ProductDetailPage() {
                           title="Adjust stock"
                         >
                           <SlidersHorizontal size={14} />
+                        </button>
+                      )}
+                      {canAdjust && v.current_stock > 0 && (
+                        <button
+                          onClick={() => {
+                            setClearTargetVariant(v)
+                            setShowClearModal(true)
+                          }}
+                          className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          title="Clear stock to 0"
+                        >
+                          <Trash2 size={14} />
                         </button>
                       )}
                       <button
@@ -293,6 +418,33 @@ export default function ProductDetailPage() {
         onSaved={fetchProduct}
         initialVariantId={selectedVariantId}
       />
+
+      {/* Clear Stock Modal */}
+      <ClearStockModal
+        isOpen={showClearModal}
+        onClose={() => {
+          setShowClearModal(false)
+          setClearTargetVariant(null)
+        }}
+        onCleared={fetchProduct}
+        productId={product.id}
+        productName={product.name}
+        variantId={clearTargetVariant?.id}
+        variantName={clearTargetVariant?.name}
+        currentStock={clearTargetVariant ? clearTargetVariant.current_stock : (product.total_stock ?? 0)}
+      />
+
+      {/* 2-Segment Serial & Barcode Manager Modal */}
+      {showSerialModal && (
+        <SerialManagerModal
+          isOpen={showSerialModal}
+          onClose={() => setShowSerialModal(false)}
+          product={product}
+          initialVariantId={serialVariantId}
+          onSaved={fetchProduct}
+        />
+      )}
     </div>
   )
 }
+

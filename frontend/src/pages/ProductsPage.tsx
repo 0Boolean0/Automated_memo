@@ -6,11 +6,13 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Search, Boxes, ChevronLeft, ChevronRight,
-  Loader2, Package, SlidersHorizontal,
+  Loader2, Package, SlidersHorizontal, Trash2, Barcode,
 } from 'lucide-react'
 import Badge from '@/components/ui/Badge'
 import ProductFormModal from '@/components/products/ProductFormModal'
 import StockAdjustmentModal from '@/components/inventory/StockAdjustmentModal'
+import ClearStockModal from '@/components/inventory/ClearStockModal'
+import SerialManagerModal from '@/components/products/SerialManagerModal'
 import { useProducts } from '@/hooks/useProducts'
 import { useAuthStore } from '@/services/authStore'
 import type { Product } from '@/services/productService'
@@ -34,6 +36,14 @@ export default function ProductsPage() {
   const [stockFilter, setStockFilter] = useState<'ALL' | 'IN_STOCK' | 'OUT_OF_STOCK'>('ALL')
   const [showAdjustment, setShowAdjustment] = useState(false)
   const [selectedVariantId, setSelectedVariantId] = useState<number | undefined>(undefined)
+
+  // Clear stock modal state
+  const [showClearModal, setShowClearModal] = useState(false)
+  const [selectedClearProduct, setSelectedClearProduct] = useState<Product | null>(null)
+
+  // Serial manager modal state
+  const [showSerialModal, setShowSerialModal] = useState(false)
+  const [selectedSerialProduct, setSelectedSerialProduct] = useState<Product | null>(null)
 
   const rawProducts = data?.items ?? []
   const products = rawProducts.filter(p => {
@@ -182,6 +192,19 @@ export default function ProductsPage() {
                       </td>
                       <td className="px-5 py-3.5 text-right" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1.5">
+                          {p.is_serialized && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedSerialProduct(p)
+                                setShowSerialModal(true)
+                              }}
+                              className="px-2.5 py-1 rounded text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 transition-colors flex items-center gap-1 border border-purple-200 shadow-2xs"
+                              title="Edit Barcode, SKU & Serial Numbers"
+                            >
+                              <Barcode size={13} /> Serials
+                            </button>
+                          )}
                           {canAdjust && (
                             <button
                               onClick={(e) => {
@@ -193,6 +216,24 @@ export default function ProductsPage() {
                               title="Adjust Stock"
                             >
                               <SlidersHorizontal size={13} /> Adjust Stock
+                            </button>
+                          )}
+                          {canAdjust && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedClearProduct(p)
+                                setShowClearModal(true)
+                              }}
+                              disabled={(p.total_stock ?? 0) <= 0}
+                              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1 border ${
+                                (p.total_stock ?? 0) > 0
+                                  ? 'text-red-700 bg-red-50 hover:bg-red-100 border-red-200 cursor-pointer'
+                                  : 'text-gray-400 bg-gray-50 border-gray-200 cursor-not-allowed opacity-50'
+                              }`}
+                              title={(p.total_stock ?? 0) > 0 ? "Clear stock to 0" : "Stock is already 0"}
+                            >
+                              <Trash2 size={13} /> Clear Stock
                             </button>
                           )}
                         </div>
@@ -250,6 +291,35 @@ export default function ProductsPage() {
         onSaved={refetch}
         initialVariantId={selectedVariantId}
       />
+
+      {/* Clear Stock Modal */}
+      {selectedClearProduct && (
+        <ClearStockModal
+          isOpen={showClearModal}
+          onClose={() => {
+            setShowClearModal(false)
+            setSelectedClearProduct(null)
+          }}
+          onCleared={refetch}
+          productId={selectedClearProduct.id}
+          productName={selectedClearProduct.name}
+          currentStock={selectedClearProduct.total_stock ?? 0}
+        />
+      )}
+
+      {/* 2-Segment Serial & Barcode Manager Modal */}
+      {selectedSerialProduct && (
+        <SerialManagerModal
+          isOpen={showSerialModal}
+          onClose={() => {
+            setShowSerialModal(false)
+            setSelectedSerialProduct(null)
+          }}
+          product={selectedSerialProduct}
+          onSaved={refetch}
+        />
+      )}
     </div>
   )
 }
+
