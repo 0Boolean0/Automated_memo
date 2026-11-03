@@ -11,7 +11,7 @@ import { Plus, Trash2, Loader2, Camera, Hash, X, Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '@/components/ui/Modal'
 import LabelScanModal from './LabelScanModal'
-import { productService, type Product, type Category, type Brand } from '@/services/productService'
+import { productService, type Product, type Category, type Brand, type UpdateVariantPayload } from '@/services/productService'
 
 // ─── Validation schema ────────────────────────────────────────────────────────
 
@@ -183,41 +183,106 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
     const current = (watch(`variants.${variantIndex}.initial_serials`) || []) as string[]
     const updated = current.filter((_, i) => i !== serialIndex)
     setValue(`variants.${variantIndex}.initial_serials`, updated, { shouldDirty: true })
+    const currentStock = Number(watch(`variants.${variantIndex}.initial_stock`) || 0)
+    if (currentStock === current.length && updated.length < currentStock) {
+      setValue(`variants.${variantIndex}.initial_stock`, updated.length, { shouldDirty: true })
+    }
   }
 
   const onSubmit = async (data: ProductFormData) => {
     try {
+      // Flush any pending text from manual serial inputs that user typed but didn't click "+ Add Serial"
+      for (let i = 0; i < data.variants.length; i++) {
+        const pending = (serialInputs[i] || '').trim()
+        if (pending) {
+          const curList = ((data.variants[i].initial_serials || []) as string[]).slice()
+          if (!curList.includes(pending)) {
+            curList.push(pending)
+            data.variants[i].initial_serials = curList
+          }
+        }
+        const sLen = (data.variants[i].initial_serials || []).length
+        if (sLen > Number(data.variants[i].initial_stock || 0)) {
+          data.variants[i].initial_stock = sLen
+        }
+      }
+
       if (isEdit && editProduct) {
         // Update product info
         await productService.update(editProduct.id, {
-          name:        data.name,
-          description: data.description,
+          name:        data.name.trim(),
+          description: data.description?.trim() || undefined,
           brand_id:    data.brand_id ?? null,
           category_id: data.category_id ?? null,
         })
         // Update each variant
         for (let i = 0; i < data.variants.length; i++) {
           const vData = data.variants[i]
+          const cleanSku = vData.sku?.trim() || null
+          const cleanBarcode = vData.barcode?.trim() || null
+          const targetStock = Number(vData.initial_stock ?? 0)
+
           if (editProduct.variants[i]) {
             const vId = editProduct.variants[i].id
-            await productService.updateVariant(vId, {
-              ...vData,
-              current_stock: vData.initial_stock,
-            })
-            // If serialized and new serials were added in edit mode
-            if (editProduct.is_serialized && vData.initial_serials) {
-              const previousSerials = origSerials[i] || []
-              const newlyAdded = vData.initial_serials.filter(s => !previousSerials.includes(s))
-              if (newlyAdded.length > 0) {
-                await productService.addSerialsToVariant(vId, newlyAdded)
+            const isSerialized = Boolean(editProduct.is_serialized)
+            const previousSerials = origSerials[i] || []
+            const currentSerials = (vData.initial_serials || []) as string[]
+            const newlyAdded = currentSerials.filter(s => !previousSerials.includes(s))
+            const removedSerials = previousSerials.filter(s => !currentSerials.includes(s))
+
+            // 1. Delete removed serials if serialized product
+            if (isSerialized && removedSerials.length > 0) {
+              try {
+                const allVariantSerials = await productService.getVariantSerials(vId)
+                for (const rem of removedSerials) {
+                  const found = allVariantSerials.find(s => s.serial === rem && s.status === 'IN_STOCK')
+                  if (found) {
+                    await productService.deleteSerialNumber(found.id)
+                  }
+                }
+              } catch (err) {
+                console.error('Failed to remove serial:', err)
               }
             }
+
+            // 2. Add new serials via addSerialsToVariant (increments stock automatically)
+            if (isSerialized && newlyAdded.length > 0) {
+              await productService.addSerialsToVariant(vId, newlyAdded)
+            }
+
+            // 3. Prepare payload for updateVariant
+            const payload: UpdateVariantPayload = {
+              name: vData.name.trim(),
+              sku: cleanSku,
+              barcode: cleanBarcode,
+              cost_price: vData.cost_price,
+              selling_price: vData.selling_price,
+              warranty_months: vData.warranty_months,
+              reorder_level: vData.reorder_level,
+            }
+
+            if (!isSerialized) {
+              payload.current_stock = targetStock
+            } else {
+              // For serialized products, if user modified target stock to differ
+              // from the number of serials, pass current_stock to generate auto-serials / adjust
+              const expectedStock = (previousSerials.length - removedSerials.length) + newlyAdded.length
+              if (targetStock !== expectedStock) {
+                payload.current_stock = targetStock
+              }
+            }
+
+            await productService.updateVariant(vId, payload)
           } else {
             await productService.addVariant(editProduct.id, {
-              ...vData,
-              sku: vData.sku || undefined,
-              barcode: vData.barcode || undefined,
-              initial_stock: vData.initial_stock,
+              name: vData.name.trim(),
+              sku: cleanSku || undefined,
+              barcode: cleanBarcode || undefined,
+              cost_price: vData.cost_price,
+              selling_price: vData.selling_price,
+              warranty_months: vData.warranty_months,
+              reorder_level: vData.reorder_level,
+              initial_stock: targetStock,
               initial_serials: vData.initial_serials || [],
             })
           }
@@ -225,15 +290,15 @@ export default function ProductFormModal({ isOpen, onClose, onSaved, editProduct
         toast.success('Product and serials updated')
       } else {
         await productService.create({
-          name:          data.name,
-          description:   data.description,
+          name:          data.name.trim(),
+          description:   data.description?.trim() || undefined,
           brand_id:      data.brand_id ?? null,
           category_id:   data.category_id ?? null,
           is_serialized: data.is_serialized as boolean,
           variants:      data.variants.map(v => ({
-            name:            v.name,
-            sku:             v.sku || undefined,
-            barcode:         v.barcode || undefined,
+            name:            v.name.trim(),
+            sku:             v.sku?.trim() || undefined,
+            barcode:         v.barcode?.trim() || undefined,
             cost_price:      v.cost_price,
             selling_price:   v.selling_price,
             warranty_months: v.warranty_months,

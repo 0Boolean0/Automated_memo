@@ -248,7 +248,7 @@ def create_product(
             raise HTTPException(status_code=404, detail="Category not found")
 
     # Check for duplicate SKUs in incoming variants
-    skus = [v.sku for v in data.variants if v.sku]
+    skus = [v.sku.strip() for v in data.variants if v.sku and v.sku.strip()]
     if len(skus) != len(set(skus)):
         raise HTTPException(status_code=409, detail="Duplicate SKU in variants")
     for sku in skus:
@@ -271,11 +271,13 @@ def create_product(
     now = datetime.now(timezone.utc)
     for vdata in data.variants:
         init_stock = max(0, getattr(vdata, 'initial_stock', 0) or 0)
+        v_sku = vdata.sku.strip() if (vdata.sku and vdata.sku.strip()) else None
+        v_barcode = vdata.barcode.strip() if (vdata.barcode and vdata.barcode.strip()) else None
         variant = ProductVariant(
             product_id=product.id,
             name=vdata.name,
-            sku=vdata.sku,
-            barcode=vdata.barcode,
+            sku=v_sku,
+            barcode=v_barcode,
             cost_price=vdata.cost_price,
             selling_price=vdata.selling_price,
             warranty_months=vdata.warranty_months,
@@ -423,9 +425,35 @@ def update_variant(
 ) -> ProductVariant:
     variant = _get_variant(db, variant_id, business_id)
 
+    # Use exclude_unset=True so unset fields are not overwritten
+    changes = data.model_dump(exclude_unset=True)
+
+    # Handle SKU
+    if "sku" in changes:
+        new_sku = changes.pop("sku")
+        if new_sku:
+            new_sku = new_sku.strip()
+            if new_sku != variant.sku:
+                existing = db.query(ProductVariant).filter(
+                    ProductVariant.sku == new_sku,
+                    ProductVariant.id != variant.id,
+                ).first()
+                if existing:
+                    raise HTTPException(status_code=409, detail=f"SKU '{new_sku}' already exists")
+            variant.sku = new_sku
+        else:
+            variant.sku = None
+
+    # Handle Barcode
+    if "barcode" in changes:
+        new_barcode = changes.pop("barcode")
+        variant.barcode = new_barcode.strip() if (new_barcode and new_barcode.strip()) else None
+
     # Record price history if prices are changing
-    changes = data.model_dump(exclude_none=True)
-    price_changed = "cost_price" in changes or "selling_price" in changes
+    price_changed = (
+        ("cost_price" in changes and changes["cost_price"] is not None and changes["cost_price"] != variant.cost_price) or
+        ("selling_price" in changes and changes["selling_price"] is not None and changes["selling_price"] != variant.selling_price)
+    )
     if price_changed:
         history = PriceHistory(
             variant_id=variant.id,
@@ -438,13 +466,8 @@ def update_variant(
         )
         db.add(history)
 
-    if data.sku and data.sku != variant.sku:
-        existing = db.query(ProductVariant).filter(ProductVariant.sku == data.sku).first()
-        if existing:
-            raise HTTPException(status_code=409, detail=f"SKU '{data.sku}' already exists")
-
     # Handle current_stock edit if specified
-    if "current_stock" in changes:
+    if "current_stock" in changes and changes["current_stock"] is not None:
         new_stock = max(0, int(changes.pop("current_stock")))
         diff = new_stock - variant.current_stock
         if diff != 0:
@@ -464,10 +487,14 @@ def update_variant(
                     date_str = datetime.now(timezone.utc).strftime("%y%m%d")
                     existing_count = db.query(SerialNumber).filter_by(variant_id=variant.id).count()
                     for i in range(1, diff + 1):
+                        candidate_sn = f"{sku_clean}-{date_str}-{existing_count + i:04d}"
+                        while db.query(SerialNumber).filter_by(serial=candidate_sn).first():
+                            existing_count += 1
+                            candidate_sn = f"{sku_clean}-{date_str}-{existing_count + i:04d}"
                         sn = SerialNumber(
                             business_id=business_id,
                             variant_id=variant.id,
-                            serial=f"{sku_clean}-{date_str}-{existing_count + i:04d}",
+                            serial=candidate_sn,
                             status="IN_STOCK",
                             cost_price=variant.cost_price,
                         )
@@ -476,6 +503,7 @@ def update_variant(
                     serials_to_update = (
                         db.query(SerialNumber)
                         .filter_by(variant_id=variant.id, status="IN_STOCK")
+                        .order_by(SerialNumber.id.desc())
                         .limit(abs(diff))
                         .all()
                     )
@@ -483,9 +511,12 @@ def update_variant(
                         sn.status = "ADJUSTED"
 
             variant.current_stock = new_stock
+    elif "current_stock" in changes:
+        changes.pop("current_stock")
 
     for k, v in changes.items():
-        setattr(variant, k, v)
+        if hasattr(variant, k) and v is not None:
+            setattr(variant, k, v)
 
     db.commit()
     db.refresh(variant)

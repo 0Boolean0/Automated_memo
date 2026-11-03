@@ -107,6 +107,9 @@ export const saleService = {
   create: (payload: CreateSalePayload) =>
     api.post<Sale>('/sales/', payload).then(r => r.data),
 
+  markPaid: (id: number) =>
+    api.post<Sale>(`/sales/${id}/mark-paid`).then(r => r.data),
+
   getSerials: (id: number) =>
     api.get<{ sale_id: number; serial_count: number; serials: SaleSerial[] }>(`/sales/${id}/serials`).then(r => r.data),
 }

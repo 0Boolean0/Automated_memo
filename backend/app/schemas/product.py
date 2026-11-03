@@ -67,6 +67,14 @@ class VariantCreate(BaseModel):
     initial_serials: Optional[list[str]] = None
     other_specs: Optional[dict[str, Any]] = None
 
+    @field_validator("sku", "barcode", mode="before")
+    @classmethod
+    def clean_empty_str(cls, v: Any) -> Optional[str]:
+        if isinstance(v, str):
+            cleaned = v.strip()
+            return cleaned if cleaned else None
+        return v
+
     @field_validator("cost_price", "selling_price")
     @classmethod
     def non_negative(cls, v: Decimal) -> Decimal:
@@ -85,6 +93,14 @@ class VariantUpdate(BaseModel):
     current_stock: Optional[int] = None
     other_specs: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
+
+    @field_validator("sku", "barcode", mode="before")
+    @classmethod
+    def clean_empty_str(cls, v: Any) -> Optional[str]:
+        if isinstance(v, str):
+            cleaned = v.strip()
+            return cleaned if cleaned else None
+        return v
 
 class PriceHistoryResponse(BaseModel):
     id: int

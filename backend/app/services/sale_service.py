@@ -411,3 +411,25 @@ def get_sale(db: Session, sale_id: int, business_id: int) -> Sale:
     if not s:
         raise HTTPException(status_code=404, detail="Sale not found")
     return s
+
+
+def mark_paid(db: Session, sale_id: int, business_id: int) -> Sale:
+    sale = get_sale(db, sale_id, business_id)
+    if sale.payment_status == "PAID":
+        return sale
+    if sale.payment_status != "PARTIAL":
+        raise HTTPException(
+            status_code=409,
+            detail="Only partially paid sales can be marked as paid",
+        )
+
+    loyalty_value = Decimal(sale.loyalty_points_redeemed) * Decimal("0.10")
+    net_payable = max(
+        Decimal("0"),
+        Decimal(sale.total_amount) - Decimal(sale.discount_amount) - loyalty_value,
+    )
+    sale.paid_amount = net_payable
+    sale.payment_status = "PAID"
+    db.commit()
+    db.refresh(sale)
+    return sale

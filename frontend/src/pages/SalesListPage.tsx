@@ -4,11 +4,12 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Loader2, Receipt, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
+import { Plus, Loader2, Receipt, ChevronLeft, ChevronRight, RotateCcw, CheckCircle } from 'lucide-react'
 import Badge from '@/components/ui/Badge'
 import { saleService, type SaleListItem } from '@/services/saleService'
 import { useAuthStore } from '@/services/authStore'
 import { formatCurrency, formatDate } from '@/utils/format'
+import toast from 'react-hot-toast'
 
 function paymentBadge(status: string): 'green' | 'yellow' | 'red' {
   return status === 'PAID' ? 'green' : status === 'PARTIAL' ? 'yellow' : 'red'
@@ -25,6 +26,7 @@ export default function SalesListPage() {
   const [page, setPage]                 = useState(1)
   const [loading, setLoading]           = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
+  const [updatingSaleId, setUpdatingSaleId] = useState<number | null>(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -43,6 +45,23 @@ export default function SalesListPage() {
 
   useEffect(() => { setPage(1) }, [statusFilter])
   useEffect(() => { fetchData() }, [fetchData])
+
+  const markPaid = async (sale: SaleListItem) => {
+    if (!window.confirm(`Mark ${sale.sale_number} as fully paid? The remaining ${formatCurrency(sale.due_amount)} will be added to the paid amount.`)) return
+
+    setUpdatingSaleId(sale.id)
+    try {
+      const updatedSale = await saleService.markPaid(sale.id)
+      setItems(current => current.map(item => item.id === sale.id
+        ? { ...item, paid_amount: updatedSale.paid_amount, due_amount: updatedSale.due_amount, payment_status: updatedSale.payment_status }
+        : item))
+      toast.success(`${sale.sale_number} marked as paid`)
+    } catch {
+      toast.error('Failed to update payment status')
+    } finally {
+      setUpdatingSaleId(null)
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -108,6 +127,7 @@ export default function SalesListPage() {
                     <th className="text-right px-5 py-3 font-medium text-gray-600">Paid</th>
                     <th className="text-right px-5 py-3 font-medium text-gray-600">Due</th>
                     <th className="text-left px-5 py-3 font-medium text-gray-600">Status</th>
+                    {canCreate && <th className="text-right px-5 py-3 font-medium text-gray-600">Action</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -129,6 +149,25 @@ export default function SalesListPage() {
                       <td className="px-5 py-3.5">
                         <Badge variant={paymentBadge(s.payment_status)}>{s.payment_status}</Badge>
                       </td>
+                      {canCreate && (
+                        <td className="px-5 py-3.5 text-right">
+                          {s.payment_status === 'PARTIAL' && (
+                            <button
+                              className="btn-secondary inline-flex items-center gap-1.5 py-1.5 text-xs"
+                              disabled={updatingSaleId === s.id}
+                              onClick={event => {
+                                event.stopPropagation()
+                                void markPaid(s)
+                              }}
+                            >
+                              {updatingSaleId === s.id
+                                ? <Loader2 size={13} className="animate-spin" />
+                                : <CheckCircle size={13} />}
+                              Mark paid
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

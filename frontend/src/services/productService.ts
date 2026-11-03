@@ -211,8 +211,8 @@ export interface UpdateProductPayload {
 
 export interface UpdateVariantPayload {
   name?: string
-  sku?: string
-  barcode?: string
+  sku?: string | null
+  barcode?: string | null
   cost_price?: number
   selling_price?: number
   warranty_months?: number

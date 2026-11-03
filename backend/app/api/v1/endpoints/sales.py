@@ -66,6 +66,17 @@ def get_sale(
     return sale_service._build_response(db, sale)
 
 
+@router.post("/{sale_id}/mark-paid", response_model=SaleResponse)
+def mark_sale_paid(
+    sale_id: int,
+    current_user: User = Depends(require_permission("create_sale")),
+    db: Session = Depends(get_db),
+):
+    """Record the remaining balance as paid for a partially paid sale."""
+    sale = sale_service.mark_paid(db, sale_id, current_user.business_id)
+    return sale_service._build_response(db, sale)
+
+
 @router.get("/{sale_id}/serials")
 def list_sale_serials(
     sale_id: int,
